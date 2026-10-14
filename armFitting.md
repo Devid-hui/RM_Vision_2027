@@ -228,9 +228,19 @@ endif()
 - ARM 设备部署时按步骤 1 的脚本重新下载即可（脚本已固化 URL 与 SHA256，可复现）；
 - 后续如需内网分发，只需把 URL 换成内网 Nexus/MinIO 地址。
 
-### 5.2 【必须】修改配置文件中的推理设备
+### 5.2 【已完成】修改配置文件中的推理设备
 
-OpenVINO 在 ARM 上只有 CPU 插件，`device: GPU` 会直接抛异常。以下配置需将 `device` 改为 `"CPU"`：
+OpenVINO 在 ARM 上只有 CPU 插件，`device: GPU` 会直接抛异常。**已完成**：以下 5 个配置文件的 `device` 均已改为 `CPU`：
+
+| 文件 | 原值 |
+|---|---|
+| `configs/ascento.yaml` | `GPU` → `CPU` |
+| `configs/standard3.yaml` | `GPU` → `CPU` |
+| `configs/sentry.yaml` | `GPU` → `CPU` |
+| `configs/standard4.yaml` | `GPU` → `CPU` |
+| `configs/mvs.yaml` | `GPU` → `CPU` |
+
+（`example.yaml`、`demo.yaml`、`mtstandard.yaml`、`uav.yaml`、`sentry_example.yaml` 原本已是 `CPU`。`classifier.cpp` 使用 `"AUTO"` 设备，在 ARM 上自动回退到 CPU 插件，无需改动。）
 
 | 文件 | 当前值 |
 |---|---|
@@ -272,9 +282,13 @@ ARM 开发板/工控机同样需要，否则相机打开失败（`MV_E_ACCESS_DE
 - 迈德威视：安装其 SDK 的 `*.rules`；
 - 无桌面环境时这一点很容易被忽略，务必确认。
 
-### 5.6 【建议】Ceres 依赖处置
+### 5.6 【已完成】Ceres 依赖处置
 
-见 §2.6。建议从 `tasks/auto_buff/CMakeLists.txt` 删除 `find_package(Ceres REQUIRED)` 与 `${CERES_LIBRARIES}` 链接，并删除根 `CMakeLists.txt` 第 49-50 行中的 `${CERES_LIBRARIES}`。若暂不改代码，则 ARM 上 `sudo apt install libceres-dev` 亦可。
+见 §2.6。已确认全项目源码无 `#include <ceres/...>` 或 `ceres::` 使用，因此**已移除**该依赖：
+- 删除 `tasks/auto_buff/CMakeLists.txt` 的 `find_package(Ceres REQUIRED)` 与 `target_link_libraries(... ${CERES_LIBRARIES})`
+- 删除根 `CMakeLists.txt` 第 60-61 行 `auto_buff_debug*` 中的 `${CERES_LIBRARIES}`
+
+移除后 ARM 全新系统少一个 apt 依赖（`libceres-dev`），构建更健壮。
 
 ### 5.7 【建议】部署脚本硬编码路径
 
@@ -343,7 +357,7 @@ cmake -B build && make -C build -j$(nproc)
 - [x] 4 处 CMakeLists 的 `OpenVINO_DIR` 已改为架构感知逻辑（ARM → `3rd_part/`，x86 → `/opt/intel` 或系统搜索，可 `-D` 覆盖）
 - [x] `3rd_part/` 已加入 `.gitignore`
 - [ ] 目标机（Ubuntu 26.04 arm64）上首次 `cmake -B build` 能通过 `find_package(OpenVINO)`（ubuntu20 构建 + glibc 兼容性实测）
-- [ ] 所有配置文件 `device` 均为 `CPU`（无 `GPU`）
+- [x] 所有配置文件 `device` 均为 `CPU`（无 `GPU`）
 - [ ] 运行时库可被链接器找到（`ldconfig -p | grep -E 'MvCameraControl|MVSDK|openvino|tbb'`），OpenVINO `plugins/` 与 TBB 目录在同一路径下
 - [ ] 相机 udev 规则生效，非 root 可访问 USB 设备
 - [ ] INT8 模型在 ARM CPU 上精度实测通过
