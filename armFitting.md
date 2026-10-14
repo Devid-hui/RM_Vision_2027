@@ -6,11 +6,11 @@
 
 ---
 
-## 0. 重要决策：OpenVINO 内置到 `three_part/`
+## 0. 重要决策：OpenVINO 内置到 `3rd_part/`
 
-**OpenVINO 不通过系统安装（不使用 `/opt/intel`），直接放入项目根目录 `three_part/`**，作为随项目分发的第三方预编译依赖。理由：
+**OpenVINO 不通过系统安装（不使用 `/opt/intel`），直接放入项目根目录 `3rd_part/`**，作为随项目分发的第三方预编译依赖。理由：
 
-- x86 / ARM 各自在 `three_part/` 中放置对应架构的 OpenVINO，源码与 CMake 完全一致，**无需架构分支**；
+- x86 / ARM 各自在 `3rd_part/` 中放置对应架构的 OpenVINO，源码与 CMake 完全一致，**无需架构分支**；
 - 换机器、重装系统无需重新安装配置 OpenVINO，放置目录即可编译；
 - 版本锁定在项目内，避免系统升级导致行为漂移。
 
@@ -18,7 +18,7 @@
 
 ```
 RM_Vision_2027/
-├── three_part/                          # 第三方预编译依赖（架构相关二进制）
+├── 3rd_part/                          # 第三方预编译依赖（架构相关二进制）
 │   └── openvino_2024.6.0/               # OpenVINO 2024.6.0（aarch64 版）
 │       └── runtime/
 │           ├── cmake/                   # find_package(OpenVINO) 入口
@@ -30,7 +30,7 @@ RM_Vision_2027/
 └── ...
 ```
 
-> 注意：`three_part/` 体积约 1GB+，建议 `.gitignore` 排除或使用 git-lfs / 内网分发，不要直接提交二进制进 git。
+> 注意：`3rd_part/` 实际体积约 102MB（arm64 版仅含 CPU 插件），已加入 `.gitignore`，不要直接提交二进制进 git。
 
 ---
 
@@ -45,7 +45,7 @@ RM_Vision_2027/
 - 平台：x86_64 + Ubuntu 20.04/22.04
 - 编译器：g++（C++17）
 - 构建：CMake ≥ 3.16，`cmake -B build && make -C build -j$(nproc)`
-- 推理：OpenVINO 2024.6.0（原为 x86 系统安装，现改为 `three_part/` 内置），部分配置使用 `device: GPU`（Intel 核显）
+- 推理：OpenVINO 2024.6.0（原为 x86 系统安装，现改为 `3rd_part/` 内置），部分配置使用 `device: GPU`（Intel 核显）
 
 ---
 
@@ -79,13 +79,13 @@ RM_Vision_2027/
 - 运行时必须让动态链接器找到这两个 `.so`（见 §5.4）。
 - 相机为 USB 设备，ARM 工控机/开发板上需要配置 **udev 规则**（否则无权限访问 `/dev/bus/usb/*`），且 USB 控制器建议使用原生 USB3 端口。
 
-### 2.3 OpenVINO 2024.6.0（**适配重点，已决策：内置 `three_part/`**）
+### 2.3 OpenVINO 2024.6.0（**适配重点，已决策：内置 `3rd_part/`**）
 
 | 项目 | x86 现状 | ARM 要求 |
 |---|---|---|
-| 获取方式 | 原为系统安装 `/opt/intel/openvino_2024.6.0/`（x86_64 版） | 下载 **aarch64 版**离线包，解压到 `three_part/openvino_2024.6.0/` |
+| 获取方式 | 原为系统安装 `/opt/intel/openvino_2024.6.0/`（x86_64 版） | **已完成**：下载官方 ubuntu20 arm64 包（33MB 压缩/102MB 解压，SHA256 已验证），解压到 `3rd_part/openvino_2024.6.0/` |
 | 可用推理设备 | CPU / GPU(iGPU) | **仅 CPU**（ARM 上无 Intel GPU/NPU 插件） |
-| CMake 查找路径 | 硬编码 `/opt/intel/openvino_2024.6.0/runtime/cmake`（4 处，见 §3） | 改为 `${CMAKE_SOURCE_DIR}/three_part/openvino_2024.6.0/runtime/cmake`（见 §5.1） |
+| CMake 查找路径 | 硬编码 `/opt/intel/openvino_2024.6.0/runtime/cmake`（4 处，见 §3） | 改为 `${CMAKE_SOURCE_DIR}/3rd_part/openvino_2024.6.0/runtime/cmake`（见 §5.1） |
 
 关键限制：
 
@@ -134,7 +134,7 @@ ARM 上若使用 Ubuntu 22.04 arm64，可直接安装官方 ROS2 Humble arm64 �
 | 行号 | 内容 | ARM 影响 |
 |---|---|---|
 | 11-16 | `find_package`: OpenCV / fmt / Eigen3 / spdlog / yaml-cpp / nlohmann_json | 均需 apt 安装 arm64 版本 |
-| **19** | `set(OpenVINO_DIR "/opt/intel/openvino_2024.6.0/runtime/cmake/")` | **硬编码系统安装路径**。需改为指向 `three_part/` 的相对路径（见 §5.1） |
+| **19** | 原 `set(OpenVINO_DIR "/opt/intel/openvino_2024.6.0/runtime/cmake/")` | **已修改**：改为架构感知路径解析，ARM 指向 `3rd_part/`（见 §5.1） |
 | 20 | `find_package(OpenVINO REQUIRED)` | 依赖上一条路径 |
 | 44-50 | 可执行文件链接 `${CERES_LIBRARIES}` | 根作用域中该变量为空（`find_package(Ceres)` 只在子目录），当前依赖 OBJECT 库传递链接，能工作但脆弱；与架构无关 |
 | 109-131 | ROS2 条件编译 | 无 ROS2 时自动跳过，ARM 上行为一致 |
@@ -150,7 +150,7 @@ ARM 上若使用 Ubuntu 22.04 arm64，可直接安装官方 ROS2 Humble arm64 �
 
 ### 3.3 `tasks/auto_aim/CMakeLists.txt`、`tasks/auto_buff/CMakeLists.txt`、`tasks/omniperception/CMakeLists.txt`
 
-- 三处同样硬编码 `set(OpenVINO_DIR "/opt/intel/openvino_2024.6.0/runtime/cmake")`（分别位于第 3/2/3 行），**需一并改为 `three_part/` 相对路径**（见 §5.1）。
+- 三处同样硬编码过 `set(OpenVINO_DIR "/opt/intel/openvino_2024.6.0/runtime/cmake")`（分别位于第 3/2/3 行），**已一并改为与根 CMakeLists 相同的架构感知逻辑**（见 §5.1）。
 - `auto_buff` 额外 `find_package(Ceres REQUIRED)`（见 §2.6）。
 - 其余内容与架构无关。
 
@@ -172,34 +172,61 @@ ARM 上若使用 Ubuntu 22.04 arm64，可直接安装官方 ROS2 Humble arm64 �
 
 ## 5. 需要改动清单
 
-### 5.1 【必须】OpenVINO 内置 `three_part/` + 修改 4 处 CMakeLists 路径
+### 5.1 【已完成】OpenVINO 内置 `3rd_part/` + 修改 4 处 CMakeLists 路径
 
-**步骤 1：放置 OpenVINO aarch64 版**
+**步骤 1：放置 OpenVINO aarch64 版（已完成）**
+
+目标设备为 Ubuntu 26.04 arm64，但官方 2024.6.0 的 arm64 构建只有 **Ubuntu 20.04** 一版
+（新版 2025.3+ 才有 ubuntu22 arm64 构建，官方 ARM 构建最高只到 Ubuntu 22.04）。
+由于 glibc 向后兼容，ubuntu20 构建的二进制可在 26.04 正常运行，因此保持项目锁定的 2024.6.0：
 
 ```bash
-mkdir -p three_part && cd three_part
-tar -xf openvino_2024.6.0_<aarch64 包名>.tgz   # 得到 three_part/openvino_2024.6.0/runtime/{cmake,include,lib/aarch64}
-cd ..
+# 实际下载并校验（SHA256 已验证通过）
+URL="https://storage.openvinotoolkit.org/repositories/openvino/packages/2024.6/linux"
+PKG="l_openvino_toolkit_ubuntu20_2024.6.0.17404.4c0f47d2335_arm64.tgz"   # 33MB 压缩 / 102MB 解压
+mkdir -p 3rd_part && cd 3rd_part
+curl -fSL -o openvino_arm64.tgz "$URL/$PKG"
+sha256sum -c   # e094e7c3e3a3931213aeeb6d6abb6cc4d654f5cb4df8da2914158ba62e25e33a
+tar -xzf openvino_arm64.tgz
+mv l_openvino_toolkit_ubuntu20_2024.6.0.17404.4c0f47d2335_arm64 openvino_2024.6.0
+rm openvino_arm64.tgz
 ```
 
-**步骤 2：修改以下 4 处硬编码路径**（根 `CMakeLists.txt` 第 19 行；`tasks/auto_aim/CMakeLists.txt` 第 3 行；`tasks/auto_buff/CMakeLists.txt` 第 2 行；`tasks/omniperception/CMakeLists.txt` 第 3 行），统一替换为：
+已核实：`runtime/lib/aarch64/libopenvino_arm_cpu_plugin.so` 为 aarch64 ELF；
+`libopenvino.so` 仅依赖 glibc/libstdc++/libtbb；TBB 已随包附带（`runtime/3rdparty/tbb/lib`）。
+
+**步骤 2：修改 4 处硬编码路径（已完成）**
+
+根 `CMakeLists.txt`（第 19 行）、`tasks/auto_aim/CMakeLists.txt`（第 3 行）、
+`tasks/auto_buff/CMakeLists.txt`（第 2 行）、`tasks/omniperception/CMakeLists.txt`（第 3 行），
+统一替换为以下架构感知逻辑：
 
 ```cmake
+# OpenVINO 路径解析（详见 armFitting.md §5.1）：
+# - ARM(aarch64)：使用项目内置 3rd_part/openvino_2024.6.0（架构相关二进制，不进 git）
+# - x86 手动解压安装：/opt/intel/openvino_2024.6.0
+# - x86 apt 安装（libopenvino-dev）：不设置 OpenVINO_DIR，由 find_package 在系统路径搜索
+# 任意场景均可通过 -DOpenVINO_DIR=<path> 覆盖
 if(NOT DEFINED OpenVINO_DIR)
-    set(OpenVINO_DIR "${CMAKE_SOURCE_DIR}/three_part/openvino_2024.6.0/runtime/cmake")
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
+        set(OpenVINO_DIR "${CMAKE_SOURCE_DIR}/3rd_part/openvino_2024.6.0/runtime/cmake")
+    elseif(EXISTS "/opt/intel/openvino_2024.6.0/runtime/cmake")
+        set(OpenVINO_DIR "/opt/intel/openvino_2024.6.0/runtime/cmake")
+    endif()
 endif()
 ```
 
 要点：
 
 - 用 `CMAKE_SOURCE_DIR`（始终指向顶层源码目录）而非 `PROJECT_SOURCE_DIR`，保证子目录 CMakeLists 中同样有效；
-- 保留 `if(NOT DEFINED ...)` 包裹，便于临时用 `-DOpenVINO_DIR=...` 覆盖（例如临时切回系统安装版）；
-- x86 分支同理：只需把 x86 版 OpenVINO 放到同一 `three_part/` 路径，**两端代码完全一致**。
+- 三场景兼容：ARM → `3rd_part/`；x86 手动解压安装 → `/opt/intel`（保持旧行为）；x86 apt 安装（如本机的 `libopenvino-dev-2026.2.0`）→ 不设变量，`find_package` 自动在系统路径找到 `/usr/lib/cmake/openvino*`；
+- 全程可用 `-DOpenVINO_DIR=<path>` 覆盖，无需改代码。
 
-**步骤 3：版本管理**
+**步骤 3：版本管理（已完成）**
 
-- `three_part/` 约 1GB+，建议加入 `.gitignore`，用 git-lfs 或内网分发/软链方式同步；
-- 若团队约定直接入库，请确认 git 仓库空间与 clone 时间可接受。
+- `3rd_part/` 已加入 `.gitignore`（实际体积 102MB，远小于预估的 1GB+，但仍不应进 git 历史）；
+- ARM 设备部署时按步骤 1 的脚本重新下载即可（脚本已固化 URL 与 SHA256，可复现）；
+- 后续如需内网分发，只需把 URL 换成内网 Nexus/MinIO 地址。
 
 ### 5.2 【必须】修改配置文件中的推理设备
 
@@ -217,14 +244,15 @@ OpenVINO 在 ARM 上只有 CPU 插件，`device: GPU` 会直接抛异常。以�
 
 ### 5.3 【必须】README 补充 ARM 依赖安装指令
 
-见 README「3.2 编译方式 → 安装依赖项」（已更新）：apt 清单不变；OpenVINO 改为下载 aarch64 包放置到 `three_part/`；相机 SDK 说明 arm64 库已内置、只需 udev 规则与运行时库路径。
+见 README「3.2 编译方式 → 安装依赖项」（已更新）：apt 清单不变；OpenVINO 改为下载 aarch64 包放置到 `3rd_part/`；相机 SDK 说明 arm64 库已内置、只需 udev 规则与运行时库路径。
 
 ### 5.4 【必须】运行时动态库路径
 
 相机 SDK 与 OpenVINO 的运行库均在项目内（编译期靠 `target_link_directories` 链接），但**运行期**动态链接器默认不知道这些路径。推荐 ldconfig 一次性配置：
 
 ```bash
-echo "$(pwd)/three_part/openvino_2024.6.0/runtime/lib/aarch64" | sudo tee /etc/ld.so.conf.d/openvino.conf
+echo "$(pwd)/3rd_part/openvino_2024.6.0/runtime/lib/aarch64" | sudo tee /etc/ld.so.conf.d/openvino.conf
+echo "$(pwd)/3rd_part/openvino_2024.6.0/runtime/3rdparty/tbb/lib" | sudo tee -a /etc/ld.so.conf.d/openvino.conf
 echo "$(pwd)/io/hikrobot/lib/arm64" | sudo tee /etc/ld.so.conf.d/mvs.conf
 echo "$(pwd)/io/mindvision/lib/arm64" | sudo tee /etc/ld.so.conf.d/mvsdk.conf
 sudo ldconfig
@@ -232,8 +260,8 @@ sudo ldconfig
 
 注意：
 
+- **TBB 必须配置**：`libopenvino.so` 依赖 `libtbb.so.12`，包内自带 aarch64 版 TBB（`runtime/3rdparty/tbb/lib/libtbb.so.12.13`）；若系统装有 `libtbb2` 也可替代，但内置方式最省事；
 - OpenVINO 的 `runtime/lib/aarch64` 下的 `plugins/`（CPU 插件）必须整目录可被找到，只链 `libopenvino.so` 会在推理时找不到插件；
-- 也可每次运行前 `export LD_LIBRARY_PATH=...`（三种方式详见 README 1.3）；
 - 相机 SDK 的 `.so` 路径含 `$PWD`，ldconfig 配置写在绝对路径里，换部署目录后需重新生成 conf。
 
 ### 5.5 【必须】相机 udev 规则（USB 设备权限）
@@ -262,8 +290,8 @@ ARM 开发板/工控机同样需要，否则相机打开失败（`MV_E_ACCESS_DE
 
 ## 6. 目标平台假设
 
-- OS：Ubuntu 22.04 LTS (Jammy) **arm64 / aarch64**（全新系统，无预装）
-- 推理后端：项目内置 `three_part/openvino_2024.6.0`（aarch64 版），`device: CPU`
+- OS：**Ubuntu 26.04 LTS arm64 / aarch64**（全新系统，无预装）
+- 推理后端：项目内置 `3rd_part/openvino_2024.6.0`（官方 ubuntu20 arm64 构建，glibc 兼容 26.04），`device: CPU`
 - 相机：HikRobot USB 工业相机（主）/ MindVision（备）
 - 不需要 ROS2 时可跳过全部 ROS 目标（CMake 自动跳过）
 
@@ -277,13 +305,20 @@ sudo apt install -y git g++ cmake can-utils libopencv-dev libfmt-dev libeigen3-d
     libspdlog-dev libyaml-cpp-dev libusb-1.0-0-dev nlohmann-json3-dev libceres-dev \
     openssh-server screen
 
-# 2) 放置 OpenVINO（aarch64 版）到 three_part/
-mkdir -p three_part && cd three_part
-tar -xf openvino_2024.6.0_<aarch64 包名>.tgz   # 得到 three_part/openvino_2024.6.0/
+# 2) 放置 OpenVINO（ubuntu20 arm64 构建，可在 26.04 运行）到 3rd_part/
+mkdir -p 3rd_part && cd 3rd_part
+curl -fSL -o openvino_arm64.tgz "https://storage.openvinotoolkit.org/repositories/openvino/packages/2024.6/linux/l_openvino_toolkit_ubuntu20_2024.6.0.17404.4c0f47d2335_arm64.tgz"
+echo "e094e7c3e3a3931213aeeb6d6abb6cc4d654f5cb4df8da2914158ba62e25e33a  openvino_arm64.tgz" | sha256sum -c -
+tar -xzf openvino_arm64.tgz && rm openvino_arm64.tgz
+mv l_openvino_toolkit_ubuntu20_2024.6.0.17404.4c0f47d2335_arm64 openvino_2024.6.0
+# 仅 C++ 推理需要 runtime/，删除非必需目录（docs/python/samples/install_dependencies/setupvars.sh），体积降至约 70MB
+rm -rf openvino_2024.6.0/docs openvino_2024.6.0/install_dependencies \
+       openvino_2024.6.0/python openvino_2024.6.0/samples openvino_2024.6.0/setupvars.sh
 cd ..
 
-# 3) 运行时库路径（OpenVINO + 两个相机 SDK）
-echo "$(pwd)/three_part/openvino_2024.6.0/runtime/lib/aarch64" | sudo tee /etc/ld.so.conf.d/openvino.conf
+# 3) 运行时库路径（OpenVINO + TBB + 两个相机 SDK）
+echo "$(pwd)/3rd_part/openvino_2024.6.0/runtime/lib/aarch64" | sudo tee /etc/ld.so.conf.d/openvino.conf
+echo "$(pwd)/3rd_part/openvino_2024.6.0/runtime/3rdparty/tbb/lib" | sudo tee -a /etc/ld.so.conf.d/openvino.conf
 echo "$(pwd)/io/hikrobot/lib/arm64" | sudo tee /etc/ld.so.conf.d/mvs.conf
 echo "$(pwd)/io/mindvision/lib/arm64" | sudo tee /etc/ld.so.conf.d/mvsdk.conf
 sudo ldconfig
@@ -293,7 +328,7 @@ sudo cp <SDK中的>.rules /etc/udev/rules.d/ && sudo udevadm control --reload &&
 
 # 5) 配置文件 device: GPU -> CPU（见 §5.2）
 
-# 6) 编译（4 处 CMakeLists 已按 §5.1 改为 three_part 相对路径）
+# 6) 编译（4 处 CMakeLists 已按 §5.1 改为架构感知路径，ARM 自动走 3rd_part）
 cmake -B build && make -C build -j$(nproc)
 
 # 7) 运行
@@ -304,12 +339,13 @@ cmake -B build && make -C build -j$(nproc)
 
 ## 8. 风险与检查清单
 
-- [ ] `three_part/openvino_2024.6.0` 放置的是 **aarch64 版**（`runtime/lib/aarch64/` 存在），而非拷贝 x86 目录
-- [ ] 4 处 CMakeLists 的 `OpenVINO_DIR` 已改为 `${CMAKE_SOURCE_DIR}/three_part/openvino_2024.6.0/runtime/cmake`
+- [x] `3rd_part/openvino_2024.6.0` 放置的是 **ubuntu20 arm64 版**（SHA256 已验证，`libopenvino_arm_cpu_plugin.so` 为 aarch64 ELF）
+- [x] 4 处 CMakeLists 的 `OpenVINO_DIR` 已改为架构感知逻辑（ARM → `3rd_part/`，x86 → `/opt/intel` 或系统搜索，可 `-D` 覆盖）
+- [x] `3rd_part/` 已加入 `.gitignore`
+- [ ] 目标机（Ubuntu 26.04 arm64）上首次 `cmake -B build` 能通过 `find_package(OpenVINO)`（ubuntu20 构建 + glibc 兼容性实测）
 - [ ] 所有配置文件 `device` 均为 `CPU`（无 `GPU`）
-- [ ] 运行时库可被链接器找到（`ldconfig -p | grep -E 'MvCameraControl|MVSDK|openvino'`），OpenVINO `plugins/` 目录在同一路径下
+- [ ] 运行时库可被链接器找到（`ldconfig -p | grep -E 'MvCameraControl|MVSDK|openvino|tbb'`），OpenVINO `plugins/` 与 TBB 目录在同一路径下
 - [ ] 相机 udev 规则生效，非 root 可访问 USB 设备
 - [ ] INT8 模型在 ARM CPU 上精度实测通过
 - [ ] 帧率/延迟在 ARM CPU 上满足决策链路预算
-- [ ] 若用哨兵链路：ROS2 Humble arm64 环境可用
-- [ ] `three_part/` 的 git 管理方式已确认（.gitignore / LFS / 内网分发）
+- [ ] 若用哨兵链路：ROS2 arm64 环境可用
