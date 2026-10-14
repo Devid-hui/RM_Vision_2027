@@ -3,27 +3,72 @@
 ## 本项目重写了同济大学的自瞄（感谢同济开源喵）
 
 ### 3.2 编译方式
+
+> **ARM（aarch64）适配说明**：本项目仓库已内置海康 / 迈德威视相机 SDK 的 arm64 版本动态库
+> （`io/hikrobot/lib/arm64/libMvCameraControl.so`、`io/mindvision/lib/arm64/libMVSDK.so`），
+> CMake 会按架构自动选择。OpenVINO 采用**内置方式**：下载对应架构（ARM 选 aarch64 版）的
+> OpenVINO 2024.6.0 放入项目 `three_part/` 目录，无需系统安装。以下安装标准为
+> **Ubuntu 22.04 LTS arm64（全新系统）**，详细的适配分析见 [armFitting.md](armFitting.md)。
+
 1. 安装依赖项：
+
+   **1.1 系统依赖（apt 源直接安装，arm64 原生）：**
+   ```bash
+   sudo apt update
+   sudo apt install -y \
+       git \
+       g++ \
+       cmake \
+       can-utils \
+       libopencv-dev \
+       libfmt-dev \
+       libeigen3-dev \
+       libspdlog-dev \
+       libyaml-cpp-dev \
+       libusb-1.0-0-dev \
+       nlohmann-json3-dev \
+       libceres-dev \
+       openssh-server \
+       screen
+   ```
+
+   **1.2 OpenVINO（内置方式：下载后放入项目 `three_part/` 目录，不安装到系统）：**
+   ```bash
+   # 下载 ARM64 离线包（与 x86 安装包不同，务必选 aarch64 / ARM64）
+   # https://docs.openvino.ai/2024/get-started/install-openvino/install-openvino-archive-linux.html
+   mkdir -p three_part && cd three_part
+   tar -xf openvino_2024.6.0_<aarch64 包名>.tgz   # 得到 three_part/openvino_2024.6.0/
+   cd ..
+   # CMake 将从 three_part/openvino_2024.6.0/runtime/cmake 查找（需配合 armFitting.md §5.1 的路径修改）
+   # 注意：three_part/ 体积约 1GB+，默认不进 git（.gitignore / git-lfs / 内网分发）
+   ```
+
+   **1.3 相机 SDK（arm64 动态库已随仓库提供，无需额外安装 SDK 本体）：**
    - [MindVision SDK](https://mindvision.com.cn/category/software/sdk-installation-package/)或[HikRobot SDK](https://www.hikrobotics.com/cn2/source/support/software/MVS_STD_GML_V2.1.2_231116.zip)
-   - [OpenVINO](https://docs.openvino.ai/2024/get-started/install-openvino/install-openvino-archive-linux.html)
-   - [Ceres](http://ceres-solver.org/installation.html)
-   - 其余：
-    ```bash
-    sudo apt install -y \
-        git \
-        g++ \
-        cmake \
-        can-utils \
-        libopencv-dev \
-        libfmt-dev \
-        libeigen3-dev \
-        libspdlog-dev \
-        libyaml-cpp-dev \
-        libusb-1.0-0-dev \
-        nlohmann-json3-dev \
-        openssh-server \
-        screen
-    ```
+   - 仅需从上述 SDK 安装包中提取 **udev 规则**（如 `51-mvs.rules`），否则无权限访问 USB 相机：
+   ```bash
+   sudo cp <SDK中的>.rules /etc/udev/rules.d/
+   sudo udevadm control --reload && sudo udevadm trigger
+   ```
+   - 运行时库路径配置（三选一，推荐 ldconfig）：
+   ```bash
+   # 方式一：ldconfig（推荐，一次性生效）
+   echo "$(pwd)/three_part/openvino_2024.6.0/runtime/lib/aarch64" | sudo tee /etc/ld.so.conf.d/openvino.conf
+   echo "$(pwd)/io/hikrobot/lib/arm64" | sudo tee /etc/ld.so.conf.d/mvs.conf
+   echo "$(pwd)/io/mindvision/lib/arm64" | sudo tee /etc/ld.so.conf.d/mvsdk.conf
+   sudo ldconfig
+
+   # 方式二：每次运行前 source OpenVINO 环境变量
+   source "$(pwd)/three_part/openvino_2024.6.0/setupvars.sh"
+
+   # 方式三：LD_LIBRARY_PATH
+   export LD_LIBRARY_PATH="$(pwd)/three_part/openvino_2024.6.0/runtime/lib/aarch64:$(pwd)/io/hikrobot/lib/arm64:$(pwd)/io/mindvision/lib/arm64:$LD_LIBRARY_PATH"
+   ```
+
+   **1.4 注意事项：**
+   - ARM 平台上 OpenVINO **仅支持 CPU 推理设备**，使用配置文件中 `device: CPU`（不要使用 `GPU`）。
+   - ROS2（可选）：仅哨兵多线程目标需要，ARM 上可安装 ROS2 Humble arm64 官方包；不装则 CMake 自动跳过 ROS 相关目标。
+   - [Ceres](http://ceres-solver.org/installation.html)：代码中实际未使用，安装 `libceres-dev` 仅为满足 CMake 查找。
 
 2. 编译：
     ```bash
