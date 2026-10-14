@@ -2,6 +2,15 @@ cmake_minimum_required(VERSION 3.16.3)
 
 project(sp_vision)
 
+# ---------- 安装目录与 RPATH ----------
+# 默认安装到项目根目录下的 install/（可用 -DCMAKE_INSTALL_PREFIX=... 覆盖）
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    set(CMAKE_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}/install" CACHE PATH "Installation prefix" FORCE)
+endif()
+# 让 install/bin 下的可执行文件通过 $ORIGIN 找到同目录内的 .so（相机 SDK / OpenVINO / TBB）
+set(CMAKE_INSTALL_RPATH "$ORIGIN")
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH FALSE)
+
 set(CMAKE_CXX_STANDARD 17)
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type")
@@ -140,3 +149,57 @@ if(ament_cmake_FOUND AND rclcpp_FOUND AND std_msgs_FOUND AND rosidl_typesupport_
 else()
     message(STATUS "ROS2 environment not found, skipping ROS2-related code.")
 endif()
+
+################## install ##################
+# 把编译产物与所有运行所需资源打包到 <prefix>（默认项目根 install/），
+# 形成自包含部署目录：
+#   install/bin/      可执行文件 + 相机 SDK(.so) + OpenVINO 运行库 + TBB
+#   install/configs/ 推理配置
+#   install/assets/  模型文件
+#   install/autostart.sh
+# 注意：OpenCV / fmt / Eigen / spdlog / yaml-cpp / nlohmann 等为系统库（apt 安装），
+#       不打包，目标机需先装好这些 apt 依赖。
+set(OV_RUNTIME "${CMAKE_SOURCE_DIR}/3rd_part/openvino_2024.6.0/runtime")
+
+# 1) 可执行文件（按目标是否生成决定是否安装；ROS2 相关目标仅在其被编译时安装）
+set(ALL_EXES standard mt_standard standard_mpc auto_aim_debug_mpc mt_auto_aim_debug
+             auto_buff_debug auto_buff_debug_mpc
+             capture calibrate_camera calibrate_handeye calibrate_robotworld_handeye split_video
+             auto_aim_test auto_buff_test camera_detect_test camera_test camera_thread_test
+             cboard_test fire_test detector_video_test gimbal_response_test multi_usbcamera_test
+             usbcamera_detect_test usbcamera_test handeye_test dm_test minimum_vision_system
+             gimbal_test planner_test planner_test_offline)
+foreach(ex ${ALL_EXES})
+    if(TARGET ${ex})
+        install(TARGETS ${ex} RUNTIME DESTINATION bin)
+    endif()
+endforeach()
+foreach(ex sentry_multithread sentry_multithread_debug publish_test)
+    if(TARGET ${ex})
+        install(TARGETS ${ex} RUNTIME DESTINATION bin)
+    endif()
+endforeach()
+
+# 2) 相机 SDK 动态库（按架构选择对应目录，打包进 bin/ 以便 $ORIGIN 找到）
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|ARM64")
+    set(HIK_LIB_DIR "${CMAKE_SOURCE_DIR}/io/hikrobot/lib/arm64")
+    set(MVS_LIB_DIR "${CMAKE_SOURCE_DIR}/io/mindvision/lib/arm64")
+else()
+    set(HIK_LIB_DIR "${CMAKE_SOURCE_DIR}/io/hikrobot/lib/amd64")
+    set(MVS_LIB_DIR "${CMAKE_SOURCE_DIR}/io/mindvision/lib/amd64")
+endif()
+install(FILES ${HIK_LIB_DIR}/libMvCameraControl.so DESTINATION bin)
+install(FILES ${MVS_LIB_DIR}/libMVSDK.so DESTINATION bin)
+
+# 3) OpenVINO 运行库 + TBB（仅当项目内置 3rd_part 版本存在时打包，使 install/ 自包含）
+if(EXISTS "${OV_RUNTIME}/lib/aarch64")
+    install(DIRECTORY "${OV_RUNTIME}/lib/aarch64/" DESTINATION bin FILES_MATCHING PATTERN "*.so*")
+    install(DIRECTORY "${OV_RUNTIME}/3rdparty/tbb/lib/" DESTINATION bin FILES_MATCHING PATTERN "*.so*")
+endif()
+
+# 4) 配置、模型与启动脚本
+install(DIRECTORY configs assets DESTINATION .)
+install(FILES autostart.sh DESTINATION .)
+
+message(STATUS "Install prefix: ${CMAKE_INSTALL_PREFIX}")
+message(STATUS "Install layout: bin/ (executables + SDK/OpenVINO .so), configs/, assets/")
