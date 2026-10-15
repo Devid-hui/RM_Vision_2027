@@ -27,8 +27,15 @@ public:
 
   io::Command decide(const std::vector<DetectionResult> & detection_queue);
 
+  // 【改动】新增 image_size 参数：PnP 需要知道图像尺寸才能在没有标定内参时
+  //         用 FOV 估算内参（cx/cy 与焦距）。默认空 Size 时只影响近似内参的
+  //         生成，不影响已标定内参的使用。
+  // 返回值：相对云台正前方的 (yaw, pitch)，单位「度」，与下位机 command 同约定：
+  //         yaw 向左为正；pitch 向下为正（内部会把 PnP 的「向上为正」取负）。
+  //         调用方 perceptron.cpp 仍然会 /57.3 转成弧度。
   Eigen::Vector2d delta_angle(
-    const std::list<auto_aim::Armor> & armors, const OmniCameraConfig & cfg);
+    const std::list<auto_aim::Armor> & armors, const OmniCameraConfig & cfg,
+    const cv::Size & image_size = cv::Size());
 
   bool armor_filter(std::list<auto_aim::Armor> & armors);
 

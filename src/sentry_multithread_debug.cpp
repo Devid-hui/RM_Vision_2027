@@ -17,6 +17,8 @@
 #include "tasks/auto_aim/tracker.hpp"
 #include "tasks/auto_aim/yolo.hpp"
 #include "tasks/omniperception/decider.hpp"
+// 【改动】load_omni_pnp_config（读取全向相机 PnP 标定参数）声明在这里
+#include "tasks/omniperception/omni_pnp.hpp"
 #include "tasks/omniperception/perceptron.hpp"
 #include "tools/exiter.hpp"
 #include "tools/img_tools.hpp"
@@ -97,6 +99,10 @@ int main(int argc, char * argv[])
                   ? yaml["omni_fov_v_" + std::to_string(i)].as<double>()
                   : 44.5;
 
+    // 【改动】读取该全向相机的 PnP 标定参数（内参/畸变/外参，全部可选），
+    // 与 sentry_multithread.cpp 共用同一份解析逻辑。
+    omniperception::load_omni_pnp_config(cfg, yaml, i);
+
     omni_configs.push_back(cfg);
     omni_cameras.push_back(std::move(cam));
   }
@@ -154,6 +160,9 @@ int main(int argc, char * argv[])
 
     /// 自瞄核心逻辑
     solver.set_R_gimbal2world(q);
+    // 【预留空位】同 sentry_multithread.cpp：主相机在小yaw上，等 MCU 给出
+    // 小yaw相对大yaw的转角 psi 后，在此调用 solver.set_small_yaw_offset(...)。
+    // 全向相机在大yaw上，不需要该修正。
 
     Eigen::Vector3d gimbal_pos = tools::eulers(solver.R_gimbal2world(), 2, 1, 0);
 

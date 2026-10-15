@@ -20,12 +20,30 @@ namespace omniperception
 
 struct OmniCameraConfig
 {
-  io::Camera * camera;
+  io::Camera * camera = nullptr;
   std::shared_ptr<tools::Recorder> recorder;
-  double mount_yaw;    // degrees
-  double mount_pitch;  // degrees
-  double fov_h;        // degrees
-  double fov_v;        // degrees
+  double mount_yaw = 0.0;    // degrees
+  double mount_pitch = 0.0;  // degrees
+  double fov_h = 54.2;       // degrees
+  double fov_v = 44.5;       // degrees
+
+  // ===========================================================================
+  //  【改动】把主相机 PnP 用到全向相机所需的标定参数（对应 yaml 的 omni_*_N 键）
+  //
+  //  渐进式设计，缺哪一项就用近似值，保证「不标定也能跑」：
+  //    · camera_matrix 空  -> 用 approximate_camera_matrix() 从 fov + 图像尺寸估算
+  //    · distort_coeffs 空 -> 当作无畸变
+  //    · has_extrinsic false -> 用 mount_to_R_camera2gimbal() 从安装角估算 R，
+  //                             并令 t = 0（相机位置相对机器人中心的偏移）
+  //    · 连 fov 都没有 -> 才回退到旧的「像素线性插值」方法（decider.cpp 兜底分支）
+  // ===========================================================================
+  // 注意：本工程 "gimbal/云台" 系 = 大yaw 系（IMU 与四个全向相机都装在大yaw上），
+  //       所以这里标的是「相机 -> 大yaw(IMU参考系)」，全向路径不需要小yaw角 psi。
+  cv::Mat camera_matrix;   // 3x3 行优先内参（CV_64F）；空 => 用 FOV 近似
+  cv::Mat distort_coeffs;  // 1x5 畸变 (k1 k2 p1 p2 k3)；空 => 无畸变
+  Eigen::Matrix3d R_camera2gimbal = Eigen::Matrix3d::Identity();  // 相机 -> 大yaw 旋转
+  Eigen::Vector3d t_camera2gimbal = Eigen::Vector3d::Zero();      // 相机 -> 大yaw 平移 (m)
+  bool has_extrinsic = false;  // R_camera2gimbal / t_camera2gimbal 是否来自标定值
 };
 
 //一个识别结果可能包含多个armor,需要排序和过滤。armors, timestamp, delta_yaw, delta_pitch

@@ -98,13 +98,15 @@ struct Armor
   double confidence;
   bool duplicated;
 
-  Eigen::Vector3d xyz_in_gimbal;  // 单位：m
-  Eigen::Vector3d xyz_in_world;   // 单位：m
-  Eigen::Vector3d ypr_in_gimbal;  // 单位：rad
-  Eigen::Vector3d ypr_in_world;   // 单位：rad
-  Eigen::Vector3d ypd_in_world;   // 球坐标系
+  // 【改动】给出确定的初值：Solver::solve / 全向 PnP 在解算失败时会提前返回，
+  // 若这些成员未初始化，下游 tracker 会读到不确定的值。默认置 0 更安全。
+  Eigen::Vector3d xyz_in_gimbal = Eigen::Vector3d::Zero();  // 单位：m
+  Eigen::Vector3d xyz_in_world = Eigen::Vector3d::Zero();   // 单位：m
+  Eigen::Vector3d ypr_in_gimbal = Eigen::Vector3d::Zero();  // 单位：rad
+  Eigen::Vector3d ypr_in_world = Eigen::Vector3d::Zero();   // 单位：rad
+  Eigen::Vector3d ypd_in_world = Eigen::Vector3d::Zero();   // 球坐标系
 
-  double yaw_raw;  // rad
+  double yaw_raw = 0.0;  // rad
 
   Armor(const Lightbar & left, const Lightbar & right);
   Armor(

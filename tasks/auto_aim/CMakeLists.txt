@@ -10,6 +10,8 @@ add_library(auto_aim OBJECT
     armor.cpp
     classifier.cpp 
     detector.cpp
+    # 【改动】新增公共 PnP 内核，主相机 Solver 与全向相机共用
+    pnp.cpp
     solver.cpp
     aimer.cpp
     target.cpp

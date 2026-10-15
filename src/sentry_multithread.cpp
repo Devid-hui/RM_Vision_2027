@@ -14,6 +14,8 @@
 #include "tasks/auto_aim/tracker.hpp"
 #include "tasks/auto_aim/yolo.hpp"
 #include "tasks/omniperception/decider.hpp"
+// 【改动】load_omni_pnp_config（读取全向相机 PnP 标定参数）声明在这里
+#include "tasks/omniperception/omni_pnp.hpp"
 #include "tasks/omniperception/perceptron.hpp"
 #include "tools/exiter.hpp"
 #include "tools/logger.hpp"
@@ -93,6 +95,16 @@ int main(int argc, char * argv[])
                   ? yaml["omni_fov_v_" + std::to_string(i)].as<double>()
                   : 44.5;
 
+    // =====================================================================
+    //  【改动】读取该全向相机的 PnP 标定参数（内参/畸变/外参，全部可选）。
+    //  键名： omni_camera_matrix_N / omni_distort_coeffs_N /
+    //         omni_R_camera2gimbal_N / omni_t_camera2gimbal_N
+    //  解析实现见 tasks/omniperception/omni_pnp.cpp::load_omni_pnp_config，
+    //  与 sentry_multithread_debug.cpp 共用同一份逻辑。
+    //  留空时的行为见 configs/sentry_example.yaml 中的说明。
+    // =====================================================================
+    omniperception::load_omni_pnp_config(cfg, yaml, i);
+
     omni_configs.push_back(cfg);
     omni_cameras.push_back(std::move(cam));
   }
@@ -145,6 +157,23 @@ int main(int argc, char * argv[])
     }
 
     solver.set_R_gimbal2world(q);
+
+    // =====================================================================
+    //  【预留空位，待接入】大小yaw结构下主相机的小yaw修正。
+    //
+    //  结构：大yaw 承载 IMU + 四个全向相机；小yaw 在大yaw之上，承载主相机。
+    //  而 R_camera2gimbal 是参考 IMU(大yaw) 做手眼标定得到的，所以小yaw一旦
+    //  离开标定位置，主相机的解算就会偏一个 psi（小yaw相对大yaw的转角）。
+    //
+    //  下位机承诺会新增一帧/字段给出 psi，拿到后在此处接入：
+    //      solver.set_small_yaw_offset(psi_now - PSI_CALIB_DURING_HANDEYE);
+    //  其中 offset 默认 0（不修正），行为与改动前完全一致；
+    //  若标定主相机时小yaw处于零位，则 PSI_CALIB 取 0。
+    //
+    //  注意：四个全向相机与 IMU 同在大yaw上，**不需要**这个修正，
+    //        全向链路直接沿用 gimbal_pos(=大yaw的世界系 yaw) 即可。
+    // =====================================================================
+    // solver.set_small_yaw_offset(psi_now - psi_calib);
 
     Eigen::Vector3d gimbal_pos = tools::eulers(solver.R_gimbal2world(), 2, 1, 0);
 

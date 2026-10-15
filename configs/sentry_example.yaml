@@ -43,6 +43,32 @@ omni_fov_v_1: 27.60                  # 相机垂直 FOV (度)
 # omni_fov_h_1: 72.8                  # 相机水平 FOV (度)
 # omni_fov_v_1: 57.9                  # 相机垂直 FOV (度)
 
+# --- 【新增】全向相机 1 的 PnP 标定参数（全部可选）---
+# 说明：全向相机现在改用与主相机相同的 PnP 解算装甲板方向（实现见
+#       tasks/omniperception/omni_pnp.cpp 与 decider.cpp::delta_angle）。
+#       下面 4 项留空时程序会自动用占位方案（仍走 PnP）：
+#         内参空 -> 用 omni_fov_h_1/omni_fov_v_1 + 图像尺寸估算针孔内参
+#         畸变空 -> 视为无畸变
+#         外参空 -> 用 omni_mount_yaw_1/omni_mount_pitch_1 近似构造旋转，平移置 0
+#       拿到标定结果后请取消注释并填入真实值，精度会明显提升。
+#
+# 内参 3x3（行优先，9 个数）：[fx, 0, cx, 0, fy, cy, 0, 0, 1]
+# omni_camera_matrix_1: [1000, 0, 320, 0, 1000, 240, 0, 0, 1]
+#
+# 畸变系数 (k1, k2, p1, p2, k3)
+# omni_distort_coeffs_1: [0, 0, 0, 0, 0]
+#
+# 相机 -> 大yaw 旋转 3x3（行优先，9 个数）。
+# 注意：本工程里 "gimbal/云台" 系 = 大yaw 系（IMU 与四个全向相机都装在大yaw上）。
+# 所以这里要标的是「相机 -> 大yaw(IMU参考系)」，可直接复用
+# calibration/calibrate_robotworld_handeye.cpp（它用 IMU 四元数作参考）。
+# 因为全向相机与 IMU 同连杆，全向路径不需要小yaw相对角 psi（主相机才需要）。
+# 下面是「光轴朝向大yaw正前方」的基准矩阵，仅作格式参考。
+# omni_R_camera2gimbal_1: [0, 0, 1, -1, 0, 0, 0, -1, 0]
+#
+# 相机 -> 大yaw 平移（m，3 个数）
+# omni_t_camera2gimbal_1: [0, 0, 0]
+
 # ----- 全向相机 2 (sursign="omni2") -----
 #camera_name_omni2: "Usbcamera"      # USB 相机
 #open_name_omni2: "video0"           # USB 相机设备名 (/dev/video*)
@@ -64,6 +90,12 @@ omni_mount_pitch_2: 0.0
 omni_fov_h_2: 36.35                  # 相机水平 FOV (度)
 omni_fov_v_2: 27.60                  # 相机垂直 FOV (度)
 
+# --- 【新增】全向相机 2 的 PnP 标定参数（格式与相机 1 相同，留空则用占位方案）---
+# omni_camera_matrix_2: [fx, 0, cx, 0, fy, cy, 0, 0, 1]
+# omni_distort_coeffs_2: [0, 0, 0, 0, 0]
+# omni_R_camera2gimbal_2: [0, 0, 1, -1, 0, 0, 0, -1, 0]
+# omni_t_camera2gimbal_2: [0, 0, 0]
+
 # ----- 全向相机 3 (sursign="omni3") -----
 camera_name_omni3: "hikrobot"
 exposure_ms_omni3: 50.0
@@ -77,6 +109,12 @@ omni_mount_pitch_3: 0.0
 omni_fov_h_3: 36.35                  # 相机水平 FOV (度)
 omni_fov_v_3: 27.60                  # 相机垂直 FOV (度)
 
+# --- 【新增】全向相机 3 的 PnP 标定参数（格式与相机 1 相同，留空则用占位方案）---
+# omni_camera_matrix_3: [fx, 0, cx, 0, fy, cy, 0, 0, 1]
+# omni_distort_coeffs_3: [0, 0, 0, 0, 0]
+# omni_R_camera2gimbal_3: [0, 0, 1, -1, 0, 0, 0, -1, 0]
+# omni_t_camera2gimbal_3: [0, 0, 0]
+
 # ----- 全向相机 4 (sursign="omni4") -----
 camera_name_omni4: "hikrobot"
 exposure_ms_omni4: 50.0
@@ -89,6 +127,12 @@ omni_mount_yaw_4: 45.0
 omni_mount_pitch_4: 0.0
 omni_fov_h_4: 36.35                  # 相机水平 FOV (度)
 omni_fov_v_4: 27.60                  # 相机垂直 FOV (度)
+
+# --- 【新增】全向相机 4 的 PnP 标定参数（格式与相机 1 相同，留空则用占位方案）---
+# omni_camera_matrix_4: [fx, 0, cx, 0, fy, cy, 0, 0, 1]
+# omni_distort_coeffs_4: [0, 0, 0, 0, 0]
+# omni_R_camera2gimbal_4: [0, 0, 1, -1, 0, 0, 0, -1, 0]
+# omni_t_camera2gimbal_4: [0, 0, 0]
 
 # ----- 神经网络 (YOLO) -----
 yolo_name: "yolov5"                 # 模型名: "yolov5" | "yolov8" | "yolo11"

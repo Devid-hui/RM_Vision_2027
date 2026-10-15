@@ -2,29 +2,17 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <cmath>
 #include <vector>
 
+// 【改动】装甲板尺寸常量与 4 点模型点已移到 pnp.hpp / pnp.cpp，
+//        由主相机和全向相机共用；这里只需要引入公共内核。
+#include "pnp.hpp"
 #include "tools/logger.hpp"
 #include "tools/math_tools.hpp"
 
 namespace auto_aim
 {
-
-// 如果有赛季会改变大装甲板的宽度和长度，就在这个地方改变参数
-constexpr double LIGHTBAR_LENGTH = 56e-3;     // m
-constexpr double BIG_ARMOR_WIDTH = 230e-3;    // m
-constexpr double SMALL_ARMOR_WIDTH = 135e-3;  // m
-
-const std::vector<cv::Point3f> BIG_ARMOR_POINTS{
-  {0, BIG_ARMOR_WIDTH / 2, LIGHTBAR_LENGTH / 2},
-  {0, -BIG_ARMOR_WIDTH / 2, LIGHTBAR_LENGTH / 2},
-  {0, -BIG_ARMOR_WIDTH / 2, -LIGHTBAR_LENGTH / 2},
-  {0, BIG_ARMOR_WIDTH / 2, -LIGHTBAR_LENGTH / 2}};
-const std::vector<cv::Point3f> SMALL_ARMOR_POINTS{
-  {0, SMALL_ARMOR_WIDTH / 2, LIGHTBAR_LENGTH / 2},
-  {0, -SMALL_ARMOR_WIDTH / 2, LIGHTBAR_LENGTH / 2},
-  {0, -SMALL_ARMOR_WIDTH / 2, -LIGHTBAR_LENGTH / 2},
-  {0, SMALL_ARMOR_WIDTH / 2, -LIGHTBAR_LENGTH / 2}};
 
 Solver::Solver(const std::string & config_path) : R_gimbal2world_(Eigen::Matrix3d::Identity())
 {
@@ -53,29 +41,51 @@ void Solver::set_R_gimbal2world(const Eigen::Quaterniond & q)
   R_gimbal2world_ = R_gimbal2imubody_.transpose() * R_imubody2imuabs * R_gimbal2imubody_;
 }
 
+// =====================================================================================
+//  【新增】大小yaw结构：小yaw修正量的存取与外参修正
+//  详细推导见 solver.hpp 中 set_small_yaw_offset 的注释。
+//  offset 默认 0 => Rz(0) = I => 与改动前行为完全一致。
+// =====================================================================================
+void Solver::set_small_yaw_offset(double offset_rad) { small_yaw_offset_ = offset_rad; }
+
+Eigen::Matrix3d Solver::rot_z(double angle) const
+{
+  const double c = std::cos(angle);
+  const double s = std::sin(angle);
+  Eigen::Matrix3d R;
+  R << c, -s, 0,  //
+    s, c, 0,      //
+    0, 0, 1;
+  return R;
+}
+
+Eigen::Matrix3d Solver::R_camera2gimbal_eff() const
+{
+  return rot_z(small_yaw_offset_) * R_camera2gimbal_;
+}
+
+Eigen::Vector3d Solver::t_camera2gimbal_eff() const
+{
+  return rot_z(small_yaw_offset_) * t_camera2gimbal_;
+}
+
 //solvePnP（获得姿态）
+// 【改动】原来的 solvePnP 调用被抽到公共内核 auto_aim::solve_pnp_armor() 中，
+//        主相机和全向相机调用的是同一份实现（tasks/auto_aim/pnp.cpp）。
+//        保留原注释以便对照：
+//          object_points 装甲板在 3D 中的点（装甲板自身坐标系，4 个角点）
+//          armor.points  装甲板在 2D 图像中的点
+//          camera_matrix_ 相机内参, distort_coeffs_ 畸变
+//          rvec 旋转量, tvec 平移量, SOLVEPNP_IPPE 平面四点解法
 void Solver::solve(Armor & armor) const
 {
-  const auto & object_points =
-    (armor.type == ArmorType::big) ? BIG_ARMOR_POINTS : SMALL_ARMOR_POINTS;
+  const auto pnp = solve_pnp_armor(armor, camera_matrix_, distort_coeffs_);
+  // 【改动】解算失败时直接返回，避免把未初始化的位姿写进 armor 再传给 tracker。
+  if (!pnp.success) return;
 
-  cv::Vec3d rvec, tvec;
-  /*
-  object_points 装甲板在3D中的点（并非在相机坐标系下的3D坐标，而是只有装甲板的，装甲板的6个点的坐标）
-  armor.points 装甲板仔2D中的点
-  camera_matrix_ 相机内参
-  distort_coeffs_ 畸变
-  rvec output：旋转量
-  rvec 平移量
-  SOLVEPNP_IPPE 
-  */
-  cv::solvePnP(
-    object_points, armor.points, camera_matrix_, distort_coeffs_, rvec, tvec, false,
-    cv::SOLVEPNP_IPPE);
-
-  Eigen::Vector3d xyz_in_camera;
-  cv::cv2eigen(tvec, xyz_in_camera);
-  armor.xyz_in_gimbal = R_camera2gimbal_ * xyz_in_camera + t_camera2gimbal_;
+  const Eigen::Vector3d & xyz_in_camera = pnp.xyz_in_camera;
+  // 【改动】使用带小yaw修正的外参（offset 默认 0 时与原来完全等价）
+  armor.xyz_in_gimbal = R_camera2gimbal_eff() * xyz_in_camera + t_camera2gimbal_eff();
 
   // // IPPE 可能选到后方解（x<0），翻转以保证目标在云台前方
   // if (armor.xyz_in_gimbal.x() < 0) {
@@ -86,11 +96,8 @@ void Solver::solve(Armor & armor) const
 
   armor.xyz_in_world = R_gimbal2world_ * armor.xyz_in_gimbal;
 
-  cv::Mat rmat;
-  cv::Rodrigues(rvec, rmat);
-  Eigen::Matrix3d R_armor2camera;
-  cv::cv2eigen(rmat, R_armor2camera);
-  Eigen::Matrix3d R_armor2gimbal = R_camera2gimbal_ * R_armor2camera;
+  const Eigen::Matrix3d & R_armor2camera = pnp.R_armor2camera;
+  Eigen::Matrix3d R_armor2gimbal = R_camera2gimbal_eff() * R_armor2camera;
   Eigen::Matrix3d R_armor2world = R_gimbal2world_ * R_armor2gimbal;
   armor.ypr_in_gimbal = tools::eulers(R_armor2gimbal, 2, 1, 0);
   armor.ypr_in_world = tools::eulers(R_armor2world, 2, 1, 0);
@@ -125,11 +132,13 @@ std::vector<cv::Point2f> Solver::reproject_armor(
   // clang-format on
 
   // get R_armor2camera t_armor2camera
+  // 【改动】用带小yaw修正的外参求逆（offset 默认 0 时等价于原来）
   const Eigen::Vector3d & t_armor2world = xyz_in_world;
   Eigen::Matrix3d R_armor2camera =
-    R_camera2gimbal_.transpose() * R_gimbal2world_.transpose() * R_armor2world;
-  Eigen::Vector3d t_armor2camera =
-    R_camera2gimbal_.transpose() * (R_gimbal2world_.transpose() * t_armor2world - t_camera2gimbal_);
+    R_camera2gimbal_eff().transpose() * R_gimbal2world_.transpose() * R_armor2world;
+  Eigen::Vector3d t_armor2camera = R_camera2gimbal_eff().transpose() *
+                                   (R_gimbal2world_.transpose() * t_armor2world -
+                                    t_camera2gimbal_eff());
 
   // get rvec tvec
   cv::Vec3d rvec;
@@ -140,7 +149,8 @@ std::vector<cv::Point2f> Solver::reproject_armor(
 
   // reproject
   std::vector<cv::Point2f> image_points;
-  const auto & object_points = (type == ArmorType::big) ? BIG_ARMOR_POINTS : SMALL_ARMOR_POINTS;
+  // 【改动】模型点改为从公共内核获取
+  const auto & object_points = armor_object_points(type);
   cv::projectPoints(object_points, rvec, tvec, camera_matrix_, distort_coeffs_, image_points);
   return image_points;
 }
@@ -148,17 +158,15 @@ std::vector<cv::Point2f> Solver::reproject_armor(
 double Solver::oupost_reprojection_error(Armor armor, const double & pitch)
 {
   // solve
-  const auto & object_points =
-    (armor.type == ArmorType::big) ? BIG_ARMOR_POINTS : SMALL_ARMOR_POINTS;
+  // 【改动】同样改用公共 PnP 内核，避免两份 solvePnP 实现漂移。
+  const auto pnp = solve_pnp_armor(armor, camera_matrix_, distort_coeffs_);
+  if (!pnp.success) return 1e10;  // 解算失败返回一个极大的误差
 
-  cv::Vec3d rvec, tvec;
-  cv::solvePnP(
-    object_points, armor.points, camera_matrix_, distort_coeffs_, rvec, tvec, false,
-    cv::SOLVEPNP_IPPE);
+  const auto & object_points = armor_object_points(armor.type);
 
-  Eigen::Vector3d xyz_in_camera;
-  cv::cv2eigen(tvec, xyz_in_camera);
-  armor.xyz_in_gimbal = R_camera2gimbal_ * xyz_in_camera + t_camera2gimbal_;
+  const Eigen::Vector3d & xyz_in_camera = pnp.xyz_in_camera;
+  // 【改动】使用带小yaw修正的外参（offset 默认 0 时与原来完全等价）
+  armor.xyz_in_gimbal = R_camera2gimbal_eff() * xyz_in_camera + t_camera2gimbal_eff();
 
   // if (armor.xyz_in_gimbal.x() < 0) {
   //   // xyz_in_camera = -xyz_in_camera;
@@ -168,11 +176,8 @@ double Solver::oupost_reprojection_error(Armor armor, const double & pitch)
 
   armor.xyz_in_world = R_gimbal2world_ * armor.xyz_in_gimbal;
 
-  cv::Mat rmat;
-  cv::Rodrigues(rvec, rmat);
-  Eigen::Matrix3d R_armor2camera;
-  cv::cv2eigen(rmat, R_armor2camera);
-  Eigen::Matrix3d R_armor2gimbal = R_camera2gimbal_ * R_armor2camera;
+  const Eigen::Matrix3d & R_armor2camera = pnp.R_armor2camera;
+  Eigen::Matrix3d R_armor2gimbal = R_camera2gimbal_eff() * R_armor2camera;
   Eigen::Matrix3d R_armor2world = R_gimbal2world_ * R_armor2gimbal;
   armor.ypr_in_gimbal = tools::eulers(R_armor2gimbal, 2, 1, 0);
   armor.ypr_in_world = tools::eulers(R_armor2world, 2, 1, 0);
@@ -198,10 +203,12 @@ double Solver::oupost_reprojection_error(Armor armor, const double & pitch)
 
   // get R_armor2camera t_armor2camera
   const Eigen::Vector3d & t_armor2world = xyz_in_world;
+  // 【改动】同样使用带小yaw修正的外参
   Eigen::Matrix3d _R_armor2camera =
-    R_camera2gimbal_.transpose() * R_gimbal2world_.transpose() * _R_armor2world;
-  Eigen::Vector3d t_armor2camera =
-    R_camera2gimbal_.transpose() * (R_gimbal2world_.transpose() * t_armor2world - t_camera2gimbal_);
+    R_camera2gimbal_eff().transpose() * R_gimbal2world_.transpose() * _R_armor2world;
+  Eigen::Vector3d t_armor2camera = R_camera2gimbal_eff().transpose() *
+                                   (R_gimbal2world_.transpose() * t_armor2world -
+                                    t_camera2gimbal_eff());
 
   // get rvec tvec
   cv::Vec3d _rvec;
@@ -291,8 +298,10 @@ double Solver::armor_reprojection_error(
 // 世界坐标到像素坐标的转换
 std::vector<cv::Point2f> Solver::world2pixel(const std::vector<cv::Point3f> & worldPoints)
 {
-  Eigen::Matrix3d R_world2camera = R_camera2gimbal_.transpose() * R_gimbal2world_.transpose();
-  Eigen::Vector3d t_world2camera = -R_camera2gimbal_.transpose() * t_camera2gimbal_;
+  // 【改动】世界->像素同样使用带小yaw修正的外参
+  Eigen::Matrix3d R_world2camera =
+    R_camera2gimbal_eff().transpose() * R_gimbal2world_.transpose();
+  Eigen::Vector3d t_world2camera = -R_camera2gimbal_eff().transpose() * t_camera2gimbal_eff();
 
   cv::Mat rvec;
   cv::Mat tvec;

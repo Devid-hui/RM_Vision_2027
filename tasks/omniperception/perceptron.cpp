@@ -116,7 +116,9 @@ void Perceptron::parallel_infer(
       });
 
       if (!armors.empty()) {
-        auto da = decider_.delta_angle(armors, cfg);
+        // 【改动】把当前帧尺寸传给 delta_angle：内部改用 PnP 解算，
+        // 在没有标定内参时会用 fov + 图像尺寸估算内参。
+        auto da = decider_.delta_angle(armors, cfg, img.size());
 
         // Calibration diagnostic: log raw detection data for each detection.
         // centre_norm (0=left, 1=right), pixel centre, and computed yaw.
