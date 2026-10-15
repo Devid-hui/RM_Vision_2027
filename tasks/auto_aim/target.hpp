@@ -19,7 +19,7 @@ class Target
 public:
   ArmorName name;
   ArmorType armor_type;
-  ArmorPriority priority;
+  ArmorPriority priority = ArmorPriority::fifth;
   bool jumped;
   int last_id;  // debug only
 
