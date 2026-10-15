@@ -23,7 +23,7 @@ find_package(Eigen3 REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(nlohmann_json REQUIRED)
-# find_package(fastcdr REQUIRED)
+find_package(fastcdr REQUIRED)
 # find_package(fastrtps REQUIRED)
 # OpenVINO 路径解析（详见 armFitting.md §5.1）：
 # - ARM(aarch64)：使用项目内置 3rd_part/openvino_2024.6.0（架构相关二进制，不进 git）
