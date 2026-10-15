@@ -1,6 +1,11 @@
 #include "serial_board.hpp"
 
+#include <stdexcept>
+
 #include "io/gimbal/protocol_crc.hpp"
+#include "io/sim/common.hpp"
+#include "io/sim/recorder.hpp"
+#include "io/sim/transport.hpp"
 #include "tools/logger.hpp"
 #include "tools/math_tools.hpp"
 #include "tools/yaml.hpp"
@@ -18,18 +23,22 @@ SerialBoard::SerialBoard(const std::string & config_path)
   use_referee_system_ = yaml["use_referee_system"].as<bool>(false);
   game_start_progress_threshold_ = yaml["game_start_progress_threshold"].as<int>(4);
 
+  // 数据源选择：real / fake / replay，由配置决定（业务代码无感知）
+  auto sim_config = sim::SimConfig::load(yaml);
+  source_mode_ = sim_config.serial.mode;
+
+  if (sim_config.record.enable) {
+    recorder_ = std::make_shared<sim::SerialRecorder>(sim_config.record.dir);
+  }
+
   try {
-    serial_.setPort(device_name_);
-    serial_.setBaudrate(baud_rate_);
-    serial_.setBytesize(serial::eightbits);
-    serial_.setParity(serial::parity_none);
-    serial_.setStopbits(serial::stopbits_one);
-    serial_.setFlowcontrol(serial::flowcontrol_none);
-    serial::Timeout timeout = serial::Timeout::simpleTimeout(50);
-    serial_.setTimeout(timeout);
-    serial_.open();
+    transport_ = sim::make_transport(sim_config);
+    if (!transport_) throw std::runtime_error("make_transport returned null");
+    transport_->open();
   } catch (const std::exception & e) {
-    tools::logger()->error("[SerialBoard] Failed to open serial: {}", e.what());
+    tools::logger()->error(
+      "[SerialBoard] Failed to open serial source (mode={}): {}", sim::to_string(source_mode_),
+      e.what());
     exit(1);
   }
 
@@ -39,8 +48,9 @@ SerialBoard::SerialBoard(const std::string & config_path)
   }
 
   tools::logger()->info(
-    "[SerialBoard] Serial port {} opened, baud={}, referee={}",
-    device_name_, baud_rate_, use_referee_system_);
+    "[{}] [SerialBoard] source={} baud={} referee={} record={}",
+    sim::log_tag(source_mode_), transport_->describe(), baud_rate_, use_referee_system_,
+    recorder_ ? recorder_->path() : std::string("off"));
 
   // 初始化 IMU 数据为单位四元数，收到真实数据后会被覆盖
   auto t0 = std::chrono::steady_clock::time_point(std::chrono::seconds(0));
@@ -55,7 +65,8 @@ SerialBoard::~SerialBoard()
 {
   quit_ = true;
   if (receive_thread_.joinable()) receive_thread_.join();
-  serial_.close();
+  if (transport_) transport_->close();
+  if (recorder_) recorder_->close();
 }
 
 Eigen::Quaterniond SerialBoard::imu_at(std::chrono::steady_clock::time_point timestamp)
@@ -116,9 +127,26 @@ void SerialBoard::send(Command command) const
 
   try {
     std::lock_guard<std::mutex> lock(send_mutex_);
-    serial_.write(reinterpret_cast<const uint8_t *>(&packet), sizeof(SendPacket));
+    const size_t n =
+      transport_->write(reinterpret_cast<const uint8_t *>(&packet), sizeof(SendPacket));
+    if (recorder_ && n > 0)
+      recorder_->record_tx(reinterpret_cast<const uint8_t *>(&packet), n);
+
+    // 非真实模式下按 1Hz 记录下发内容，便于验收时区分真实/伪数据
+    // 注意：不可用 time_point::min() 初始化，相减会整数溢出导致该日志永不触发
+    static bool first_log = true;
+    static auto last_log = std::chrono::steady_clock::now();
+    const auto now = std::chrono::steady_clock::now();
+    if (source_mode_ != sim::SourceMode::Real &&
+        (first_log || std::chrono::duration<double>(now - last_log).count() >= 1.0)) {
+      first_log = false;
+      last_log = now;
+      tools::logger()->info(
+        "[{}] [SerialBoard] TX 0x0402 yaw={:.3f} pitch={:.3f} shoot={}", sim::log_tag(source_mode_),
+        command.yaw, command.pitch, static_cast<int>(packet.shoot));
+    }
   } catch (const std::exception & e) {
-    tools::logger()->warn("[SerialBoard] Failed to write serial: {}", e.what());
+    tools::logger()->warn("[SerialBoard] Failed to write source: {}", e.what());
   }
 }
 
@@ -142,9 +170,12 @@ void SerialBoard::send(NavCommand command) const
 
   try {
     std::lock_guard<std::mutex> lock(send_mutex_);
-    serial_.write(reinterpret_cast<const uint8_t *>(&packet), sizeof(NavigationPacket));
+    const size_t n =
+      transport_->write(reinterpret_cast<const uint8_t *>(&packet), sizeof(NavigationPacket));
+    if (recorder_ && n > 0)
+      recorder_->record_tx(reinterpret_cast<const uint8_t *>(&packet), n);
   } catch (const std::exception & e) {
-    tools::logger()->warn("[SerialBoard] Failed to write serial: {}", e.what());
+    tools::logger()->warn("[SerialBoard] Failed to write source: {}", e.what());
   }
 }
 
@@ -237,7 +268,9 @@ void SerialBoard::handleBass(const bassPacket & pkt)
 bool SerialBoard::read(uint8_t * buffer, size_t size)
 {
   try {
-    return serial_.read(buffer, size) == size;
+    const size_t n = transport_->read(buffer, size, 50);
+    if (recorder_ && n > 0) recorder_->record_rx(buffer, n);
+    return n == size;
   } catch (const std::exception & e) {
     return false;
   }
@@ -411,14 +444,14 @@ void SerialBoard::reconnect()
     tools::logger()->warn(
       "[SerialBoard] Reconnecting serial, attempt {}/{}...", i + 1, max_retry_count);
     try {
-      serial_.close();
+      if (transport_) transport_->close();
       std::this_thread::sleep_for(std::chrono::seconds(1));
     } catch (...) {
     }
 
     try {
-      serial_.setBaudrate(baud_rate_);
-      serial_.open();
+      if (!transport_) throw std::runtime_error("null transport");
+      transport_->open();
       queue_.clear();
       tools::logger()->info("[SerialBoard] Reconnected successfully.");
       return;

@@ -18,3 +18,9 @@ records_25/
 patterns
 promote/
 build-debug/
+
+# mock-input 分支新增：本地构建产物（install/ 未纳入版本控制，882MB）
+install/
+
+# mock-input 分支新增：Python 虚拟下位机的字节码缓存
+__pycache__/

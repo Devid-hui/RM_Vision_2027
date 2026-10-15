@@ -23,7 +23,7 @@ find_package(Eigen3 REQUIRED)
 find_package(spdlog REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(nlohmann_json REQUIRED)
-find_package(fastcdr REQUIRED)
+# find_package(fastcdr REQUIRED)
 # find_package(fastrtps REQUIRED)
 # OpenVINO 路径解析（详见 armFitting.md §5.1）：
 # - ARM(aarch64)：使用项目内置 3rd_part/openvino_2024.6.0（架构相关二进制，不进 git）
@@ -58,6 +58,8 @@ add_executable(auto_aim_debug_mpc src/auto_aim_debug_mpc.cpp)
 add_executable(mt_auto_aim_debug src/mt_auto_aim_debug.cpp)
 add_executable(auto_buff_debug src/auto_buff_debug.cpp)
 add_executable(auto_buff_debug_mpc src/auto_buff_debug_mpc.cpp)
+# 虚拟数据源运行器（无硬件可跑通 real / fake / replay）
+add_executable(virtual_run src/virtual_run.cpp)
 # add_executable(uav src/uav.cpp)
 # add_executable(uav_debug src/uav_debug.cpp)
 
@@ -68,6 +70,7 @@ target_link_libraries(auto_aim_debug_mpc ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_a
 target_link_libraries(mt_auto_aim_debug ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff tools io)
 target_link_libraries(auto_buff_debug ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io)
 target_link_libraries(auto_buff_debug_mpc ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io)
+target_link_libraries(virtual_run ${OpenCV_LIBS} fmt::fmt yaml-cpp io tools)
 # target_link_libraries(uav ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff tools io)
 # target_link_libraries(uav_debug ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
 
@@ -163,7 +166,7 @@ set(OV_RUNTIME "${CMAKE_SOURCE_DIR}/3rd_part/openvino_2024.6.0/runtime")
 
 # 1) 可执行文件（按目标是否生成决定是否安装；ROS2 相关目标仅在其被编译时安装）
 set(ALL_EXES standard mt_standard standard_mpc auto_aim_debug_mpc mt_auto_aim_debug
-             auto_buff_debug auto_buff_debug_mpc
+             auto_buff_debug auto_buff_debug_mpc virtual_run
              capture calibrate_camera calibrate_handeye calibrate_robotworld_handeye split_video
              auto_aim_test auto_buff_test camera_detect_test camera_test camera_thread_test
              cboard_test fire_test detector_video_test gimbal_response_test multi_usbcamera_test
