@@ -235,6 +235,7 @@ struct CameraSourceConfig
   int width = 1440;
   int height = 1080;
   double fps = 30.0;
+  int pool = 4;            // fake 模式帧缓冲池大小（>=4 即可支撑 300fps 零拷贝产帧）
   std::string replay_dir;  // replay 模式：含 camera.tsv 的会话目录
 
   static CameraSourceConfig load(
@@ -250,6 +251,7 @@ struct CameraSourceConfig
     c.width = node_as_any<int>(yaml, "camera_width" + sfx, "camera_width", c.width);
     c.height = node_as_any<int>(yaml, "camera_height" + sfx, "camera_height", c.height);
     c.fps = node_as_any<double>(yaml, "camera_frame_rate" + sfx, "camera_frame_rate", c.fps);
+    c.pool = node_as_any<int>(yaml, "fake_camera_pool" + sfx, "fake_camera_pool", c.pool);
     c.replay_dir = node_as<std::string>(
       yaml, "camera_replay_dir", std::string("logs/virtual_session"));
     return c;

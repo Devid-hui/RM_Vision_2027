@@ -88,21 +88,26 @@ void Perceptron::parallel_infer(
 
       //得到一个img，然后使用yolo推理，这个时候yolo是提供出来的了一个框的，这个时候我们把原图和框放在一起保存起来。
       auto armors = yolo->detect(img);
-      cv::Mat display_img = img.clone();
-      for (const auto & armor : armors) {
-        cv::rectangle(display_img, armor.box, cv::Scalar(0, 255, 0), 2);
-        std::string label = fmt::format(
-          "{} {} {:.2f}", auto_aim::COLORS[armor.color], auto_aim::ARMOR_NAMES[armor.name],
-          armor.confidence);
-        cv::putText(display_img, label, cv::Point(armor.box.x, armor.box.y - 5),
-          cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
-        for (const auto & pt : armor.points) {
-          cv::circle(display_img, pt, 2, cv::Scalar(0, 0, 255), -1);
-        }
-      }
 
-      if (cfg.recorder && !display_img.empty()) {
-        cfg.recorder->record(display_img, Eigen::Quaterniond::Identity(), ts);
+      // 画框图只有一个用途：交给 recorder 存档。没有 recorder 时整帧 clone（1440x1080
+      // 约 4.4MB）+ 画框纯属浪费，300fps 压力测试下会直接吃掉可观带宽，因此仅在需要时做。
+      if (cfg.recorder) {
+        cv::Mat display_img = img.clone();
+        for (const auto & armor : armors) {
+          cv::rectangle(display_img, armor.box, cv::Scalar(0, 255, 0), 2);
+          std::string label = fmt::format(
+            "{} {} {:.2f}", auto_aim::COLORS[armor.color], auto_aim::ARMOR_NAMES[armor.name],
+            armor.confidence);
+          cv::putText(display_img, label, cv::Point(armor.box.x, armor.box.y - 5),
+            cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 255, 0), 1);
+          for (const auto & pt : armor.points) {
+            cv::circle(display_img, pt, 2, cv::Scalar(0, 0, 255), -1);
+          }
+        }
+
+        if (!display_img.empty()) {
+          cfg.recorder->record(display_img, Eigen::Quaterniond::Identity(), ts);
+        }
       }
       //至此，都是记录。
 

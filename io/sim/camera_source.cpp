@@ -5,6 +5,7 @@
 #include <fmt/format.h>
 #include <stdexcept>
 
+#include "tools/exiter.hpp"
 #include "tools/logger.hpp"
 #include "tools/yaml.hpp"
 
@@ -91,17 +92,62 @@ std::string RealHikCameraSource::device_name() const
 }
 
 // ============================ FakeCameraSource ============================
-FakeCameraSource::FakeCameraSource(const CameraSourceConfig & cfg, const FaultConfig & fault, int seed)
+FakeCameraSource::FakeCameraSource(
+  const CameraSourceConfig & cfg, const FaultConfig & fault, int seed, std::string tag)
 : cfg_(cfg), fault_(fault), injector_(fault, seed)
 {
   if (cfg_.width < 2) cfg_.width = 1440;
   if (cfg_.height < 2) cfg_.height = 1080;
   if (cfg_.fps <= 0.0) cfg_.fps = 30.0;
-  device_name_ = "fake_" + cfg_.kind;
+  if (cfg_.pool < 2) cfg_.pool = 2;
+  tag_ = tag.empty() ? std::string("cam") : std::move(tag);
+  device_name_ = "fake_" + cfg_.kind + "[" + tag_ + "]";
   cv::theRNG().state = static_cast<uint64_t>(seed);
 }
 
 FakeCameraSource::~FakeCameraSource() { close(); }
+
+// 底图只渲染一次：这张图会被所有帧复用，所以这里可以画得足够"重"
+void FakeCameraSource::build_base()
+{
+  const int w = cfg_.width, h = cfg_.height;
+
+  base_.create(h, w, CV_8UC3);
+  for (int y = 0; y < h; ++y) base_.row(y).setTo(cv::Scalar(40 + 30 * y / h, 60, 90 - 30 * y / h));
+
+  const int cell = 80;
+  for (int y = 0; y < h; y += cell)
+    for (int x = 0; x < w; x += cell)
+      if (((x / cell) + (y / cell)) % 2 == 0)
+        cv::rectangle(
+          base_, {x, y}, {std::min(x + cell, w - 1), std::min(y + cell, h - 1)},
+          cv::Scalar(190, 190, 190), 2);
+
+  // 中心十字 + 相机名：便于人工核对是哪一路
+  cv::line(base_, {w / 2 - 80, h / 2}, {w / 2 + 80, h / 2}, cv::Scalar(0, 0, 255), 3);
+  cv::line(base_, {w / 2, h / 2 - 80}, {w / 2, h / 2 + 80}, cv::Scalar(0, 0, 255), 3);
+  cv::putText(
+    base_, tag_, {w / 2 - 120, h / 2 - 120}, cv::FONT_HERSHEY_SIMPLEX, 3.0, cv::Scalar(0, 255, 0), 6);
+
+  // overlay 复原块：每帧贴回去，避免多帧叠加残影（~45KB，可忽略）
+  overlay_roi_ = cv::Rect(4, 4, std::min(360, w - 8), std::min(70, h - 8));
+  patch_ = base_(overlay_roi_).clone();
+}
+
+// 产帧热路径：只做一块 overlay 复原 + 一小段文字，没有全帧写入
+void FakeCameraSource::render_overlay(cv::Mat & buf)
+{
+  if (patch_.empty() || buf.cols < overlay_roi_.x + overlay_roi_.width ||
+      buf.rows < overlay_roi_.y + overlay_roi_.height)
+    return;
+
+  patch_.copyTo(buf(overlay_roi_));
+  const double t =
+    std::chrono::duration<double>(SteadyClock::now() - SessionClock::start_time()).count();
+  cv::putText(
+    buf, fmt::format("{} f={} t={:.2f}", tag_, frame_id_, t), {12, 46}, cv::FONT_HERSHEY_SIMPLEX,
+    0.9, cv::Scalar(0, 255, 255), 2);
+}
 
 void FakeCameraSource::open()
 {
@@ -127,35 +173,24 @@ void FakeCameraSource::open()
     }
   }
 
+  // 所有 kind 都预渲染底图（一次性）：序列/视频加载失败时用它兜底
+  build_base();
+
+  // synth：高帧率零拷贝路径 —— 缓冲池 + 单槽 holder
+  if (cfg_.kind == "synth") {
+    pool_.resize(static_cast<size_t>(cfg_.pool));
+    pool_free_.assign(pool_.size(), true);
+    for (auto & buf : pool_) buf = base_.clone();
+    tools::logger()->info(
+      "[FAKE] '{}' zero-copy pool ready: {} buffers of {}x{}", tag_, pool_.size(), cfg_.width,
+      cfg_.height);
+  }
+
+  // 冻结注入需要上一帧内容，仅在开启时分配
+  if (fault_.camera_freeze_rate > 0.0) freeze_.create(cfg_.height, cfg_.width, CV_8UC3);
+
   quit_ = false;
   thread_ = std::thread([this] { run(); });
-}
-
-cv::Mat FakeCameraSource::make_synth_frame()
-{
-  const int w = 640, h = 480;
-  cv::Mat base(h, w, CV_8UC3);
-  for (int y = 0; y < h; ++y) base.row(y).setTo(cv::Scalar(40 + y / 6, 60, 90 - y / 8));
-
-  const int cell = 40;
-  for (int y = 0; y < h; y += cell)
-    for (int x = 0; x < w; x += cell)
-      if (((x / cell) + (y / cell)) % 2 == 0)
-        cv::rectangle(base, {x, y}, {x + cell, y + cell}, cv::Scalar(200, 200, 200), -1);
-
-  const double t =
-    std::chrono::duration<double>(SteadyClock::now() - SessionClock::start_time()).count();
-  const int cx = static_cast<int>(w * 0.5 + w * 0.35 * std::sin(2.0 * M_PI * 0.2 * t));
-  const int cy = static_cast<int>(h * 0.5 + h * 0.30 * std::cos(2.0 * M_PI * 0.2 * t));
-  cv::rectangle(base, {cx - 30, cy - 20}, {cx + 30, cy + 20}, cv::Scalar(0, 0, 255), -1);
-
-  cv::putText(
-    base, fmt::format("FAKE f={} t={:.2f}s", frame_id_, t), {10, 24}, cv::FONT_HERSHEY_SIMPLEX, 0.6,
-    cv::Scalar(0, 255, 255), 1);
-
-  cv::Mat out;
-  cv::resize(base, out, {cfg_.width, cfg_.height}, 0, 0, cv::INTER_LINEAR);
-  return out;
 }
 
 cv::Mat FakeCameraSource::next_image()
@@ -164,9 +199,7 @@ cv::Mat FakeCameraSource::next_image()
     cv::Mat img = cv::imread(files_[file_index_ % files_.size()], cv::IMREAD_COLOR);
     file_index_++;
     if (!img.empty()) return img;
-    return make_synth_frame();
-  }
-  if (cfg_.kind == "video" && video_.isOpened()) {
+  } else if (cfg_.kind == "video" && video_.isOpened()) {
     cv::Mat img;
     video_ >> img;
     if (img.empty()) {
@@ -174,28 +207,52 @@ cv::Mat FakeCameraSource::next_image()
       video_ >> img;
     }
     if (!img.empty()) return img;
-    return make_synth_frame();
   }
-  return make_synth_frame();
+  // 兜底：预渲染底图（一次性构建），这里只做一次拷贝
+  return base_.empty() ? cv::Mat() : base_.clone();
 }
 
-void FakeCameraSource::emit(const cv::Mat & img, bool injected)
+// 取一个空闲池缓冲；池内全忙返回 -1（产帧端让路，绝不阻塞消费者）
+int FakeCameraSource::take_free_buffer()
+{
+  std::lock_guard<std::mutex> lock(holder_mutex_);
+  for (size_t i = 0; i < pool_.size(); ++i) {
+    if (pool_free_[i]) {
+      pool_free_[i] = false;
+      return static_cast<int>(i);
+    }
+  }
+  return -1;
+}
+
+// 发布到单槽 holder：与真实相机一致，永远让消费者拿到"最新帧"。
+// 被覆盖掉的旧帧计入 overwritten_ —— 这是"产得比消费快"的直接指标。
+void FakeCameraSource::publish_frame(const cv::Mat & img, int pool_idx, bool injected)
 {
   if (img.empty()) return;
 
-  Frame f;
-  f.timestamp = SteadyClock::now();
-  f.frame_id = frame_id_++;
-  f.width = img.cols;
-  f.height = img.rows;
-  f.format = img.type();
-  f.data = img;
-  f.mode = SourceMode::Fake;
-  f.injected = injected;
+  {
+    std::lock_guard<std::mutex> lock(holder_mutex_);
+    if (holder_idx_ >= 0) {
+      pool_free_[static_cast<size_t>(holder_idx_)] = true;
+      overwritten_++;
+    }
 
-  queue_.push(f);  // 队列满时丢弃旧帧，保留最新帧（与真实相机一致）
-  emitted_++;
-  if (injected) injected_count_++;
+    holder_.timestamp = SteadyClock::now();
+    holder_.frame_id = frame_id_++;
+    holder_.width = img.cols;
+    holder_.height = img.rows;
+    holder_.format = img.type();
+    holder_.data = img;  // 池内缓冲共享，零拷贝
+    holder_.mode = SourceMode::Fake;
+    holder_.injected = injected;
+    holder_idx_ = pool_idx;
+
+    emitted_++;
+    if (injected) injected_count_++;
+  }
+
+  holder_cv_.notify_all();
 }
 
 void FakeCameraSource::run()
@@ -203,12 +260,14 @@ void FakeCameraSource::run()
   const double period = 1.0 / cfg_.fps;
   const auto t0 = SteadyClock::now();
   long long tick = 0;
-  cv::Mat last;
   auto last_log = t0;
+  long long win_emitted = 0, win_delivered = 0;
+  const bool pooled = (cfg_.kind == "synth");
 
   tools::logger()->info(
-    "[FAKE] FakeCamera started: {}x{} @{}fps kind={} faults={}", cfg_.width, cfg_.height, cfg_.fps,
-    cfg_.kind, fault_.enabled() ? "on" : "off");
+    "[FAKE] '{}' started: {}x{} @{}fps kind={} pool={} faults={}", tag_, cfg_.width, cfg_.height,
+    cfg_.fps, cfg_.kind, pooled ? static_cast<int>(pool_.size()) : 0,
+    fault_.enabled() ? "on" : "off");
 
   while (!quit_) {
     const auto target =
@@ -231,14 +290,32 @@ void FakeCameraSource::run()
 
     bool injected = false;
     cv::Mat img;
-    if (!last.empty() && injector_.chance(fault_.camera_freeze_rate)) {
-      img = last;
-      injected = true;
+    int pool_idx = -1;
+
+    if (pooled) {
+      // 零拷贝路径：从池取一个空闲缓冲，只重画一小块 overlay
+      pool_idx = take_free_buffer();
+      if (pool_idx < 0) {
+        starved_++;
+        if (starved_ == 1 || starved_ % 5000 == 0)
+          tools::logger()->warn(
+            "[FAKE] '{}' pool exhausted ({} frames given up, consumer too slow?)", tag_, starved_);
+        continue;
+      }
+      img = pool_[static_cast<size_t>(pool_idx)];
+      render_overlay(img);
     } else {
+      // 序列 / 视频：每帧本来就要读一张新图，无法零拷贝
       img = next_image();
+      if (img.empty()) continue;
+      img = img.clone();
     }
-    if (img.empty()) continue;
-    img = img.clone();  // 保证本帧独占缓冲，后续原地修改安全
+
+    if (!freeze_.empty() && injector_.chance(fault_.camera_freeze_rate)) {
+      freeze_.copyTo(img);
+      injected = true;
+      tools::logger()->warn("[FAULT:freeze] camera frame frozen (count={})", injected_count_ + 1);
+    }
 
     if (injector_.chance(fault_.camera_black_rate)) {
       img.setTo(cv::Scalar(0, 0, 0));
@@ -264,35 +341,85 @@ void FakeCameraSource::run()
       injected = true;
     }
 
-    emit(img, injected);
+    publish_frame(img, pool_idx, injected);
 
     if (injector_.chance(fault_.camera_duplicate_rate)) {
       duplicated_++;
-      emit(img, true);
+      if (pooled) {
+        // 复制到另一个空闲缓冲，避免与 holder 中的同一块缓冲冲突
+        const int dup_idx = take_free_buffer();
+        if (dup_idx >= 0) {
+          img.copyTo(pool_[static_cast<size_t>(dup_idx)]);
+          publish_frame(pool_[static_cast<size_t>(dup_idx)], dup_idx, true);
+        } else {
+          starved_++;
+        }
+      } else {
+        publish_frame(img.clone(), -1, true);
+      }
       tools::logger()->warn("[FAULT:dup] camera frame duplicated (count={})", duplicated_);
     }
 
-    last = img;
+    // 记录本帧内容供冻结注入使用（仅开启冻结时才有这次额外拷贝）
+    if (!freeze_.empty()) img.copyTo(freeze_);
 
-    if (std::chrono::duration<double>(SteadyClock::now() - last_log).count() >= 2.0) {
+    const auto now = SteadyClock::now();
+    if (std::chrono::duration<double>(now - last_log).count() >= 2.0) {
+      const double dt = std::chrono::duration<double>(now - last_log).count();
       tools::logger()->info(
-        "[FAKE] FakeCamera stats: emitted={} dropped={} duplicated={} injected={}", emitted_,
-        dropped_, duplicated_, injected_count_);
-      last_log = SteadyClock::now();
+        "[FAKE] '{}' stats: emitted={} ({:.1f}fps) delivered={} ({:.1f}fps) overwritten={} "
+        "starved={} dropped={} dup={} injected={}",
+        tag_, emitted_, static_cast<double>(emitted_ - win_emitted) / dt, delivered_,
+        static_cast<double>(delivered_ - win_delivered) / dt, overwritten_, starved_, dropped_,
+        duplicated_, injected_count_);
+      win_emitted = emitted_;
+      win_delivered = delivered_;
+      last_log = now;
     }
   }
 
   tools::logger()->info(
-    "[FAKE] FakeCamera stopped: emitted={} dropped={} duplicated={} injected={}", emitted_, dropped_,
-    duplicated_, injected_count_);
+    "[FAKE] '{}' stopped: emitted={} delivered={} overwritten={} starved={} dropped={} dup={} "
+    "injected={}",
+    tag_, emitted_, delivered_, overwritten_, starved_, dropped_, duplicated_, injected_count_);
 }
 
 bool FakeCameraSource::read(Frame & out, int timeout_ms)
 {
-  if (timeout_ms > 0) return queue_.try_pop_for(out, std::chrono::milliseconds(timeout_ms));
+  const bool bounded = (timeout_ms > 0);
+  const auto deadline =
+    SteadyClock::now() + std::chrono::milliseconds(timeout_ms > 0 ? timeout_ms : 0);
 
   while (!quit_) {
-    if (queue_.try_pop_for(out, std::chrono::milliseconds(100))) return true;
+    {
+      std::unique_lock<std::mutex> lock(holder_mutex_);
+
+      auto slice = std::chrono::milliseconds(100);
+      if (bounded) {
+        const auto remain =
+          std::chrono::duration_cast<std::chrono::milliseconds>(deadline - SteadyClock::now());
+        if (remain.count() <= 0) return false;
+        if (remain < slice) slice = remain;
+      }
+
+      holder_cv_.wait_for(lock, slice, [this] { return holder_idx_ >= 0 || quit_; });
+      if (quit_) break;
+
+      if (holder_idx_ >= 0) {
+        // 关键：把池内缓冲换成本次独占的克隆。
+        // 只有真正被消费的帧付这一次全帧拷贝，产帧端 1500fps 的路径上没有全帧写入。
+        out = holder_;
+        out.data = out.data.clone();
+        pool_free_[static_cast<size_t>(holder_idx_)] = true;
+        holder_idx_ = -1;
+        holder_ = Frame{};
+        delivered_++;
+        return true;
+      }
+    }
+
+    if (bounded) return false;
+    if (tools::exiting()) break;  // 与真实相机一致：退出信号可以打断阻塞
   }
   return false;
 }
@@ -300,6 +427,7 @@ bool FakeCameraSource::read(Frame & out, int timeout_ms)
 void FakeCameraSource::close()
 {
   quit_ = true;
+  holder_cv_.notify_all();
   if (thread_.joinable()) thread_.join();
 }
 
@@ -444,11 +572,13 @@ CameraSource::Ptr make_camera_source(
     case SourceMode::Real:
       return std::make_unique<RealHikCameraSource>(config_path, sursign);
     case SourceMode::Fake:
-      return std::make_unique<FakeCameraSource>(cfg, sim.fault, sim.seed);
+      return std::make_unique<FakeCameraSource>(
+        cfg, sim.fault, sim.seed, sursign.empty() ? std::string("main") : sursign);
     case SourceMode::Replay:
       return std::make_unique<ReplayCameraSource>(cfg, sim.fault, sim.seed);
   }
-  return std::make_unique<FakeCameraSource>(cfg, sim.fault, sim.seed);
+  return std::make_unique<FakeCameraSource>(
+    cfg, sim.fault, sim.seed, sursign.empty() ? std::string("main") : sursign);
 }
 
 }  // namespace io::sim
