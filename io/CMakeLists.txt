@@ -16,6 +16,12 @@ add_library(io STATIC
     gimbal/gimbal.cpp
     gimbal/protocol_crc.cpp
     serial_board.cpp
+    # ---- 虚拟数据源 (real / fake / replay) ----
+    sim/transport.cpp
+    sim/virtual_mcu.cpp
+    sim/recorder.cpp
+    sim/quaternion_source.cpp
+    sim/camera_source.cpp
 )
 
 target_include_directories(io

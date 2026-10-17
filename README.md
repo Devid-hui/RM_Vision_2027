@@ -91,6 +91,65 @@
     cmake --build build -j1 2>&1 | tee build_error.log
     ```
 
+### 数据源：real / fake / replay（无真实下位机与相机也能跑通）
+>
+> 业务算法不直接依赖硬件，只依赖抽象数据源（`io::sim::QuaternionSource` / `io::sim::CameraSource`），
+> 通过配置在 `real` / `fake` / `replay` 之间切换，**业务代码一行不改**。
+> 实现位于 `io/sim/`，Python 虚拟下位机位于 `sim/virtual_mcu.py`。
+
+**1) 抽象接口与实现**
+
+| 方向 | 抽象 | real | fake | replay |
+| --- | --- | --- | --- | --- |
+| 串口四元数 | `io::sim::QuaternionSource` | `RealSerialSource` | `FakeSerialSource` | `ReplaySerialSource` |
+| 相机图像 | `io::sim::CameraSource` | `RealHikCameraSource` | `FakeCameraSource` | `ReplayCameraSource` |
+
+三种实现共用同一套「真实协议字节解析」与同一套 `io::CameraBase` 适配器，因此**帧率、时间戳语义、
+报文格式完全一致**：fake 由内置虚拟下位机按 0xA5 + CRC8/CRC16 打包 0x502/0x503/0x505/0x0001。
+
+**2) 配置切换（示例见 `configs/virtual_example.yaml` / `virtual_replay.yaml` / `virtual_fault.yaml`）**
+
+```yaml
+source_mode: "fake"          # real | fake | replay（可用 serial_mode / camera_mode 单独覆盖）
+serial_mode: "fake"          # 串口四元数源
+camera_name: "fake"          # 相机源：fake=伪相机，replay=回放相机
+fake_serial_external: false  # true 时改用外部 Python 虚拟下位机提供的 pty
+fake_camera_source: "synth"  # synth(合成图案) | sequence(图片序列) | video(视频文件)
+record: { enable: true, dir: "logs/virtual_session", save_images: true }
+```
+
+**3) 无硬件运行**
+
+```bash
+# 纯内置伪数据（推荐）：四元数 500Hz + 合成图像 30fps，同时记录
+./build/virtual_run configs/virtual_example.yaml --duration=8 --show
+
+# 业务入口直接跑（只改配置：camera_name fake + source_mode fake）
+./build/mt_standard configs/mtstandard_virtual.yaml
+```
+
+**4) Python 虚拟下位机（pty 伪串口）**
+
+```bash
+python3 sim/virtual_mcu.py --port-file /tmp/vmcu.pts          # 打印 /dev/pts/N
+python3 sim/virtual_mcu.py --drop-rate 0.05 --spike-every 200 --corrupt-crc-rate 0.02
+python3 sim/virtual_mcu.py --replay logs/virtual_session/serial.bin   # 回放录制字节
+# 然后设置 com_port: "<上面打印的 /dev/pts/N>"，serial_mode: real（主程序按普通串口打开）
+```
+> 注意：Python 侧 CRC16 表与 `io/gimbal/protocol_crc.cpp` 的固件表**严格对齐**（索引 47 为 `0xD974`），
+> 修改任一侧都必须同步。
+
+**5) 异常注入与记录回放**
+
+- 可注入：串口丢包/延迟/跳变/校验错误/角度噪声；相机丢帧/重复帧/黑屏/过曝/冻结/噪声/延迟。
+  固定 `fault_seed` 保证异常序列可复现。
+- 日志用 `[REAL]` / `[FAKE]` / `[REPLAY]` 标识数据来源，`[FAULT:drop]`、`[FAULT:crc]`、`[FAULT:black]`
+  等标识注入的异常，`[FAULT] frame ... injected anomaly` 标识下游收到的异常帧。
+- 记录内容：`serial.bin`（串口原始字节 + 方向 + 时间戳）、`camera.tsv` + `camera/*.png`（帧 + 时间戳 + 帧信息），
+  时间戳统一基于会话单调时钟；改 `source_mode: replay` 即按原时间轴复现。
+
+**6) 局限**：不覆盖海康 SDK 初始化、设备枚举、驱动异常等底层问题，仍需真实硬件验证。
+
 ### 支持兵种并维护
 
 哨兵，步兵，英雄

@@ -12,6 +12,7 @@ YOLO::YOLO(const std::string & config_path, bool debug)
 {
   auto yaml = YAML::LoadFile(config_path);
   auto yolo_name = yaml["yolo_name"].as<std::string>();
+  lock_enabled_ = yaml["yolo_lock"] ? yaml["yolo_lock"].as<bool>() : true;
 
   if (yolo_name == "yolov8") {
     yolo_ = std::make_unique<YOLOV8>(config_path, debug);
@@ -32,6 +33,10 @@ YOLO::YOLO(const std::string & config_path, bool debug)
 
 std::list<Armor> YOLO::detect(const cv::Mat & img, int frame_count)
 {
+  if (!lock_enabled_) return yolo_->detect(img, frame_count);
+
+  // 多相机共享同一实例时必须串行：OpenVINO 的 InferRequest 不支持并发调用
+  std::lock_guard<std::mutex> lock(*mutex_);
   return yolo_->detect(img, frame_count);
 }
 

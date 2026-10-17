@@ -4,6 +4,7 @@
 #include <Eigen/Geometry>
 #include <atomic>
 #include <chrono>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -11,7 +12,9 @@
 
 #include "io/command.hpp"
 #include "io/gimbal/packet.hpp"
-#include "serial/serial.h"
+#include "io/sim/common.hpp"
+#include "io/sim/recorder.hpp"
+#include "io/sim/transport.hpp"
 #include "tools/thread_safe_queue.hpp"
 
 namespace io
@@ -44,7 +47,11 @@ private:
     std::chrono::steady_clock::time_point timestamp;
   };
 
-  mutable serial::Serial serial_;
+  // 数据源：真实串口 / 内置虚拟下位机 / 原始字节回放，由配置决定，解析逻辑完全一致
+  sim::IByteTransport::Ptr transport_;
+  sim::SourceMode source_mode_ = sim::SourceMode::Real;
+  std::shared_ptr<sim::SerialRecorder> recorder_;
+
   std::string device_name_;
   uint32_t baud_rate_ = 921600;
 
