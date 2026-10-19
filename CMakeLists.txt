@@ -38,6 +38,7 @@ add_executable(auto_aim_debug_mpc src/auto_aim_debug_mpc.cpp)
 add_executable(mt_auto_aim_debug src/mt_auto_aim_debug.cpp)
 add_executable(auto_buff_debug src/auto_buff_debug.cpp)
 add_executable(auto_buff_debug_mpc src/auto_buff_debug_mpc.cpp)
+add_executable(soldier src/soldier.cpp)
 # add_executable(uav src/uav.cpp)
 # add_executable(uav_debug src/uav_debug.cpp)
 
@@ -48,6 +49,7 @@ target_link_libraries(auto_aim_debug_mpc ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_a
 target_link_libraries(mt_auto_aim_debug ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff tools io)
 target_link_libraries(auto_buff_debug ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io ${CERES_LIBRARIES})
 target_link_libraries(auto_buff_debug_mpc ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io ${CERES_LIBRARIES})
+target_link_libraries(soldier ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
 # target_link_libraries(uav ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff tools io)
 # target_link_libraries(uav_debug ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
 
