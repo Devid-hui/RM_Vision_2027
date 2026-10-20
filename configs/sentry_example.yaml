@@ -169,12 +169,10 @@ max_temp_lost_count: 25             # 普通目标最大临时丢失帧数
 outpost_max_temp_lost_count: 75     # 前哨站目标最大临时丢失帧数
 
 # ----- 瞄准器 (Aimer) -----
-yaw_offset: -0.8                    # yaw 整体偏移 (度)
+yaw_offset: -0.8                    # yaw 整体偏移 (度)，单枪管只调这一个
 pitch_offset: -1.0                  # pitch 整体偏移 (度)
 comming_angle: 60                   # 陀螺旋转 coming angle 阈值 (度)
 leaving_angle: 20                   # 陀螺旋转 leaving angle 阈值 (度)
-left_yaw_offset: -1.0               # 左侧射击 yaw 偏置 (度, 哨兵双枪管用)
-right_yaw_offset: -0.6              # 右侧射击 yaw 偏置 (度, 哨兵双枪管用)
 decision_speed: 10                  # 高速/低速判定阈值 (rad/s)
 high_speed_delay_time: 0.026        # 高速状态下弹道延迟时间 (s)
 low_speed_delay_time: 0.010         # 低速状态下弹道延迟时间 (s)
