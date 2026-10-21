@@ -24,3 +24,4 @@ install/
 
 # mock-input 分支新增：Python 虚拟下位机的字节码缓存
 __pycache__/
+cmake-build-debug/
