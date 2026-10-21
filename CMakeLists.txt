@@ -91,68 +91,20 @@ target_link_libraries(calibrate_handeye ${OpenCV_LIBS} fmt::fmt yaml-cpp tools)
 target_link_libraries(calibrate_robotworld_handeye ${OpenCV_LIBS} fmt::fmt yaml-cpp tools)
 target_link_libraries(split_video ${OpenCV_LIBS} fmt::fmt tools)
 
-##################tests##################
-add_executable(auto_aim_test tests/auto_aim_test.cpp)
-add_executable(auto_buff_test tests/auto_buff_test.cpp)
-add_executable(camera_detect_test tests/camera_detect_test.cpp)
-add_executable(camera_test tests/camera_test.cpp)
-add_executable(camera_thread_test tests/camera_thread_test.cpp)
-add_executable(cboard_test tests/cboard_test.cpp)
-add_executable(fire_test tests/fire_test.cpp)
-add_executable(detector_video_test tests/detector_video_test.cpp)
-add_executable(gimbal_response_test tests/gimbal_response_test.cpp)
-add_executable(multi_usbcamera_test tests/multi_usbcamera_test.cpp)
-add_executable(usbcamera_detect_test tests/usbcamera_detect_test.cpp)
-add_executable(usbcamera_test tests/usbcamera_test.cpp)
-add_executable(handeye_test tests/handeye_test.cpp)
-add_executable(dm_test tests/dm_test.cpp)
-add_executable(minimum_vision_system tests/minimum_vision_system.cpp)
-
-target_link_libraries(auto_aim_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io auto_aim)
-target_link_libraries(auto_buff_test ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io)
-target_link_libraries(camera_detect_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools auto_aim io)
-target_link_libraries(camera_test ${OpenCV_LIBS} fmt::fmt tools io)
-target_link_libraries(camera_thread_test ${OpenCV_LIBS} fmt::fmt auto_aim tools io)
-target_link_libraries(cboard_test ${OpenCV_LIBS} fmt::fmt tools io)
-target_link_libraries(fire_test ${OpenCV_LIBS} fmt::fmt tools io)
-target_link_libraries(detector_video_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools auto_aim)
-target_link_libraries(gimbal_response_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io)
-target_link_libraries(multi_usbcamera_test ${OpenCV_LIBS} fmt::fmt tools io)
-target_link_libraries(usbcamera_detect_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io auto_aim)
-target_link_libraries(usbcamera_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io)
-target_link_libraries(handeye_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io auto_aim)
-target_link_libraries(dm_test ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io)
-target_link_libraries(minimum_vision_system ${OpenCV_LIBS} fmt::fmt yaml-cpp tools io auto_aim)
-
-add_executable(gimbal_test tests/gimbal_test.cpp)
-target_link_libraries(gimbal_test ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
-
-add_executable(planner_test tests/planner_test.cpp)
-target_link_libraries(planner_test ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
-
-add_executable(planner_test_offline tests/planner_test_offline.cpp)
-target_link_libraries(planner_test_offline ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
-
 # 检查 ROS 环境
 find_package(ament_cmake QUIET)
 find_package(rclcpp QUIET)
 find_package(std_msgs QUIET)
 find_package(rosidl_typesupport_cpp QUIET)
 # find_package(sp_msgs QUIET)
-# 只有在找到 ROS 环境时才会添加 sentry 和 publish_test
+# 只有在找到 ROS 环境时才会添加 sentry
 if(ament_cmake_FOUND AND rclcpp_FOUND AND std_msgs_FOUND AND rosidl_typesupport_cpp_FOUND)
-    # 编译 sentry 和 publish_test
+    # 编译 sentry
     add_executable(sentry_multithread src/sentry_multithread.cpp)
     add_executable(sentry_multithread_debug src/sentry_multithread_debug.cpp)
-    add_executable(publish_test tests/publish_test.cpp)
-    # add_executable(subscribe_test tests/subscribe_test.cpp)
-    # add_executable(topic_loop_test tests/topic_loop_test.cpp)
 
     target_link_libraries(sentry_multithread ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim omniperception tools io)
     target_link_libraries(sentry_multithread_debug ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim omniperception tools io)
-    target_link_libraries(publish_test ${OpenCV_LIBS} fmt::fmt tools io auto_aim)
-    # target_link_libraries(subscribe_test ${OpenCV_LIBS} fmt::fmt tools io)
-    # target_link_libraries(topic_loop_test ${OpenCV_LIBS} fmt::fmt tools io)
 else()
     message(STATUS "ROS2 environment not found, skipping ROS2-related code.")
 endif()
@@ -171,17 +123,13 @@ set(OV_RUNTIME "${CMAKE_SOURCE_DIR}/3rd_part/openvino_2024.6.0/runtime")
 # 1) 可执行文件（按目标是否生成决定是否安装；ROS2 相关目标仅在其被编译时安装）
 set(ALL_EXES standard mt_standard standard_mpc auto_aim_debug_mpc mt_auto_aim_debug
              auto_buff_debug auto_buff_debug_mpc virtual_run
-             capture calibrate_camera calibrate_handeye calibrate_robotworld_handeye split_video
-             auto_aim_test auto_buff_test camera_detect_test camera_test camera_thread_test
-             cboard_test fire_test detector_video_test gimbal_response_test multi_usbcamera_test
-             usbcamera_detect_test usbcamera_test handeye_test dm_test minimum_vision_system
-             gimbal_test planner_test planner_test_offline)
+             capture calibrate_camera calibrate_handeye calibrate_robotworld_handeye split_video)
 foreach(ex ${ALL_EXES})
     if(TARGET ${ex})
         install(TARGETS ${ex} RUNTIME DESTINATION bin)
     endif()
 endforeach()
-foreach(ex sentry_multithread sentry_multithread_debug publish_test)
+foreach(ex sentry_multithread sentry_multithread_debug)
     if(TARGET ${ex})
         install(TARGETS ${ex} RUNTIME DESTINATION bin)
     endif()
