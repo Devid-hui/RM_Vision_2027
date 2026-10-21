@@ -1,5 +1,3 @@
-#include <fmt/core.h>
-
 #include <chrono>
 #include <cmath>
 #include <limits>
@@ -13,7 +11,6 @@
 #include "tasks/auto_aim/solver.hpp"
 #include "tasks/auto_aim/yolo.hpp"
 #include "tools/exiter.hpp"
-#include "tools/img_tools.hpp"
 #include "tools/logger.hpp"
 #include "tools/math_tools.hpp"
 #include "tools/yaml.hpp"
@@ -50,9 +47,6 @@ int main(int argc, char * argv[])
   // YOLO 不做敌我过滤，颜色由配置决定
   auto enemy_color =
     (yaml["enemy_color"].as<std::string>("red") == "red") ? auto_aim::red : auto_aim::blue;
-
-  // 无显示器的板子上保持 false，否则 cv::imshow 会抛异常
-  bool show_window = yaml["show_window"].as<bool>(false);
 
   tools::Exiter exiter;
 
@@ -124,21 +118,12 @@ int main(int argc, char * argv[])
     // 0x0402 下发到下位机，由下位机驱动云台；shoot 恒为 0
     serial_board.send(command);
 
-    if (show_window) {
-      for (const auto & armor : armors) {
-        cv::rectangle(img, armor.box, cv::Scalar(0, 255, 0), 2);
-        for (const auto & point : armor.points) {
-          cv::circle(img, point, 2, cv::Scalar(0, 0, 255), -1);
-        }
+    // 画框与四个关键点（不做 imshow/imwrite，无显示器环境下安全）
+    for (const auto & armor : armors) {
+      cv::rectangle(img, armor.box, cv::Scalar(0, 255, 0), 2);
+      for (const auto & point : armor.points) {
+        cv::circle(img, point, 2, cv::Scalar(0, 0, 255), -1);
       }
-      if (target != armors.end()) {
-        tools::draw_text(
-          img, fmt::format("d={:.2f}m", target->xyz_in_gimbal.norm()),
-          cv::Point(target->box.x, target->box.y - 5), cv::Scalar(0, 255, 255), 0.6);
-      }
-      cv::resize(img, img, {}, 0.5, 0.5);
-      cv::imshow("soldier", img);
-      if (cv::waitKey(1) == 'q') break;
     }
 
     // 2Hz 打印解算与下发结果，便于无显示环境下调试
