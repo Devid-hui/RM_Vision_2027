@@ -76,20 +76,64 @@
    - [Ceres](http://ceres-solver.org/installation.html)：代码中实际未使用，安装 `libceres-dev` 仅为满足 CMake 查找。
 
 2. 编译：
-    ```bash
-    cmake -B build
-    # 普通编译
-    make -C build/ -j`nproc`
-    ```
 
-    ```bash
-    #不输出wearning，单线程编译。
-    cmake -S . -B build \
+   **2.1 ARM 本机编译（默认方式）：**
+
+   ```bash
+   cmake -B build
+   # 普通编译
+   make -C build/ -j`nproc`
+   ```
+
+   **2.2 x86 开发机交叉编译到 ARM（工具链文件 `cmake/aarch64-linux-gnu.cmake`）：**
+
+   ```bash
+   # 安装交叉编译器（一次性）
+   sudo apt install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+   # 配置（指定工具链文件即可，CMakeLists 会自动切换到 ARM 分支：
+   # OpenVINO 指向 3rd_part/，相机 SDK 选择 io/*/lib/arm64）
+   cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/aarch64-linux-gnu.cmake
+   cmake --build build -j$(nproc)
+   ```
+
+   > 交叉编译需要 arm64 版的 apt 依赖（OpenCV / fmt / Eigen3 / spdlog / yaml-cpp /
+   > nlohmann_json / libusb-1.0 等），通过 sysroot 提供，二选一：
+   >
+   > **方式 A：从目标 ARM 板同步根文件系统**（依赖与目标机完全一致，最稳妥）
+   > ```bash
+   > rsync -a --exclude=/proc --exclude=/sys --exclude=/dev user@arm-board:/ /opt/arm64-sysroot/
+   > ```
+   >
+   > **方式 B：本地用 mmdebstrap 生成 arm64 rootfs 并装入依赖**（无需 ARM 板）
+   > ```bash
+   > sudo apt install -y mmdebstrap qemu-user-static
+   > CODENAME=$(lsb_release -cs)   # 26.04 为 resolute
+   > sudo mmdebstrap --arch=arm64 --variant=important "$CODENAME" /opt/arm64-sysroot \
+   >     http://ports.ubuntu.com/ubuntu-ports \
+   >     --hook='copy-in -v /usr/bin/qemu-aarch64-static /usr/bin/' \
+   >     --customize-hook='chroot "$1" apt-get update' \
+   >     --customize-hook='chroot "$1" apt-get install -y --no-install-recommends \
+   >         libopencv-dev libfmt-dev libeigen3-dev libspdlog-dev libyaml-cpp-dev \
+   >         nlohmann-json3-dev libusb-1.0-0-dev'
+   > ```
+   >
+   > 然后带 sysroot 配置编译：
+   > ```bash
+   > cmake -B build -DCMAKE_TOOLCHAIN_FILE=cmake/aarch64-linux-gnu.cmake \
+   >       -DAARCH64_SYSROOT=/opt/arm64-sysroot
+   > cmake --build build -j$(nproc)
+   > ```
+   > 也可以不建 sysroot，用 `-DOpenCV_DIR=<arm64路径>` 等逐个显式指定。
+
+   ```bash
+   #不输出wearning，单线程编译。
+   cmake -S . -B build \
   -DCMAKE_BUILD_TYPE=Debug \
   -DCMAKE_CXX_FLAGS_DEBUG="-O0 -g -w -fdiagnostics-color=always -fmax-errors=10"
     
-    cmake --build build -j1 2>&1 | tee build_error.log
-    ```
+   cmake --build build -j1 2>&1 | tee build_error.log
+   ```
 
 ### 数据源：real / fake / replay（无真实下位机与相机也能跑通）
 >

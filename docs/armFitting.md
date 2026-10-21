@@ -106,7 +106,7 @@ RM_Vision_2027/
 
 以下目标在检测到 ROS2 时才编译，其余全部目标不依赖 ROS2：
 
-- `src/sentry_multithread.cpp`、`src/sentry_multithread_debug.cpp`、`tests/publish_test.cpp`
+- `src/sentry_multithread.cpp`、`src/sentry_multithread_debug.cpp`
 - `io` 库中的 `ros2/publish2nav.cpp`、`ros2/ros2.cpp`、`ros2/subscribe2nav.cpp`
 
 ARM 上若使用 Ubuntu 22.04 arm64，可直接安装官方 ROS2 Humble arm64 包；若不需要哨兵链路，可完全不装 ROS2。
