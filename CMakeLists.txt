@@ -58,6 +58,7 @@ add_executable(auto_aim_debug_mpc src/auto_aim_debug_mpc.cpp)
 add_executable(mt_auto_aim_debug src/mt_auto_aim_debug.cpp)
 add_executable(auto_buff_debug src/auto_buff_debug.cpp)
 add_executable(auto_buff_debug_mpc src/auto_buff_debug_mpc.cpp)
+# 步兵主程序：YOLO 检测 + PnP 位姿定位，默认配置 configs/soldier.yaml
 add_executable(soldier src/soldier.cpp)
 # 虚拟数据源运行器（无硬件可跑通 real / fake / replay）
 add_executable(virtual_run src/virtual_run.cpp)
@@ -71,10 +72,10 @@ target_link_libraries(auto_aim_debug_mpc ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_a
 target_link_libraries(mt_auto_aim_debug ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff tools io)
 target_link_libraries(auto_buff_debug ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io ${CERES_LIBRARIES})
 target_link_libraries(auto_buff_debug_mpc ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io ${CERES_LIBRARIES})
-target_link_libraries(soldier ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
 target_link_libraries(auto_buff_debug ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io)
 target_link_libraries(auto_buff_debug_mpc ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_buff tools io)
 target_link_libraries(virtual_run ${OpenCV_LIBS} fmt::fmt yaml-cpp io tools)
+target_link_libraries(soldier ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
 # target_link_libraries(uav ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim auto_buff tools io)
 # target_link_libraries(uav_debug ${OpenCV_LIBS} fmt::fmt yaml-cpp auto_aim tools io)
 
@@ -122,7 +123,7 @@ set(OV_RUNTIME "${CMAKE_SOURCE_DIR}/3rd_part/openvino_2024.6.0/runtime")
 
 # 1) 可执行文件（按目标是否生成决定是否安装；ROS2 相关目标仅在其被编译时安装）
 set(ALL_EXES standard mt_standard standard_mpc auto_aim_debug_mpc mt_auto_aim_debug
-             auto_buff_debug auto_buff_debug_mpc virtual_run
+             auto_buff_debug auto_buff_debug_mpc virtual_run soldier
              capture calibrate_camera calibrate_handeye calibrate_robotworld_handeye split_video)
 foreach(ex ${ALL_EXES})
     if(TARGET ${ex})
