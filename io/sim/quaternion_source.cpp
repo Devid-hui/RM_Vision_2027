@@ -3,8 +3,8 @@
 #include <cmath>
 #include <stdexcept>
 
-#include "io/gimbal/packet.hpp"
-#include "io/gimbal/protocol_crc.hpp"
+#include "io/serial/gimbal/packet.hpp"
+#include "io/serial/gimbal/protocol_crc.hpp"
 #include "tools/logger.hpp"
 
 namespace io::sim

@@ -180,7 +180,7 @@ python3 sim/virtual_mcu.py --drop-rate 0.05 --spike-every 200 --corrupt-crc-rate
 python3 sim/virtual_mcu.py --replay logs/virtual_session/serial.bin   # 回放录制字节
 # 然后设置 com_port: "<上面打印的 /dev/pts/N>"，serial_mode: real（主程序按普通串口打开）
 ```
-> 注意：Python 侧 CRC16 表与 `io/gimbal/protocol_crc.cpp` 的固件表**严格对齐**（索引 47 为 `0xD974`），
+> 注意：Python 侧 CRC16 表与 `io/serial/gimbal/protocol_crc.cpp` 的固件表**严格对齐**（索引 47 为 `0xD974`），
 > 修改任一侧都必须同步。
 
 **5) 异常注入与记录回放**

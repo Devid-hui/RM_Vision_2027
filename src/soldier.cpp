@@ -5,8 +5,7 @@
 #include <thread>
 
 #include "io/camera.hpp"
-#include "io/command.hpp"
-#include "io/serial_board.hpp"
+#include "io/can/cboard.hpp"
 #include "tasks/auto_aim/armor.hpp"
 #include "tasks/auto_aim/solver.hpp"
 #include "tasks/auto_aim/yolo.hpp"
