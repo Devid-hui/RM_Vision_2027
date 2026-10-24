@@ -1,9 +1,8 @@
-#include <fmt/core.h>
-#include <yaml-cpp/yaml.h>
-
 #include <chrono>
+#include <cmath>
 #include <limits>
 #include <opencv2/opencv.hpp>
+#include <thread>
 
 #include "io/camera.hpp"
 #include "io/can/cboard.hpp"
@@ -11,13 +10,14 @@
 #include "tasks/auto_aim/solver.hpp"
 #include "tasks/auto_aim/yolo.hpp"
 #include "tools/exiter.hpp"
-#include "tools/img_tools.hpp"
 #include "tools/logger.hpp"
+#include "tools/math_tools.hpp"
+#include "tools/yaml.hpp"
 
 using namespace std::chrono_literals;
 
 const std::string keys =
-  "{help h usage ? |                        | 输出命令行参数说明}"
+  "{help h usage ? |                      | 输出命令行参数说明}"
   "{@config-path   | configs/soldier.yaml | 位置参数，yaml配置文件路径 }";
 
 int main(int argc, char * argv[])
@@ -29,14 +29,28 @@ int main(int argc, char * argv[])
     return 0;
   }
 
+  auto yaml = tools::load(config_path);
+
+  // SerialBoard 构造函数强制读取 com_port，缺失时会直接 exit(1)，这里提前给出可操作提示
+  if (!yaml["com_port"]) {
+    tools::logger()->error(
+      "[soldier] {} 缺少串口配置，SerialBoard 需要以下键：\n"
+      "  com_port: \"/dev/gimbal\"\n"
+      "  baud_rate: 921600\n"
+      "  bullet_speed: 28.0\n"
+      "  use_referee_system: false",
+      config_path);
+    return 1;
+  }
+
+  // YOLO 不做敌我过滤，颜色由配置决定
   auto enemy_color =
-    (YAML::LoadFile(config_path)["enemy_color"].as<std::string>() == "red") ? auto_aim::red
-                                                                           : auto_aim::blue;
+    (yaml["enemy_color"].as<std::string>("red") == "red") ? auto_aim::red : auto_aim::blue;
 
   tools::Exiter exiter;
 
-  io::Camera camera(config_path);
-  io::CBoard cboard(config_path);
+  io::Camera camera(config_path);  // 不带 sursign：读取 camera_name / exposure_ms / gain
+  io::SerialBoard serial_board(config_path);
 
   auto_aim::YOLO detector(config_path, false);
   auto_aim::Solver solver(config_path);
@@ -46,32 +60,39 @@ int main(int argc, char * argv[])
   std::chrono::steady_clock::time_point t;
 
   auto last_log_time = std::chrono::steady_clock::now();
+  bool game_started_logged = false;
 
   while (!exiter.exit()) {
     camera.read(img, t);
-    q = cboard.imu_at(t - 1ms);
-
     if (img.empty()) continue;
 
-    // YOLO 检测不区分敌我颜色，此处按配置过滤
+    // IMU 四元数 -> 云台到世界系的旋转，PnP 结果据此转到世界系
+    q = serial_board.imu_at(t - 1ms);
+    solver.set_R_gimbal2world(q);
+    const Eigen::Vector3d gimbal_pos = tools::eulers(solver.R_gimbal2world(), 2, 1, 0);
+
+    // 裁判系统判定未开赛时不下发指令（use_referee_system=false 时恒为 true）
+    if (!serial_board.is_game_started()) {
+      if (!game_started_logged) {
+        game_started_logged = true;
+        tools::logger()->info("[soldier] 等待比赛开始（裁判系统未就绪），暂停自瞄");
+      }
+      std::this_thread::sleep_for(10ms);
+      continue;
+    }
+
+    // YOLO 检测
     auto armors = detector.detect(img);
     armors.remove_if([&enemy_color](const auto_aim::Armor & armor) {
       return armor.color != enemy_color;
     });
 
-    // 更新云台到世界坐标系的旋转，PnP 结果据此转到世界坐标系
-    solver.set_R_gimbal2world(q);
-
+    // PnP 解算：逐块求位姿，并选出离图像中心最近的一块作为当前目标
     const cv::Point2f img_center(img.cols / 2.0f, img.rows / 2.0f);
     auto target = armors.end();
     auto min_offset = std::numeric_limits<double>::max();
-
     for (auto it = armors.begin(); it != armors.end(); ++it) {
-      // PnP 解算：由装甲板四角点和真实尺寸得到位置与姿态
       solver.solve(*it);
-
-      tools::draw_points(img, it->points, {0, 255, 0});
-
       auto offset = cv::norm(it->center - img_center);
       if (offset < min_offset) {
         min_offset = offset;
@@ -79,40 +100,48 @@ int main(int argc, char * argv[])
       }
     }
 
+    // 默认指令：保持当前朝向、不开火
+    io::Command command{false, false, gimbal_pos[0], gimbal_pos[1]};
+
     if (target != armors.end()) {
-      const Eigen::Vector3d & xyz_in_gimbal = target->xyz_in_gimbal;
-      const Eigen::Vector3d & xyz_in_world = target->xyz_in_world;
-      auto distance = xyz_in_gimbal.norm();
+      const Eigen::Vector3d & xyz = target->xyz_in_world;
+      const double horizon = std::hypot(xyz.x(), xyz.y());
 
-      tools::draw_point(img, target->center, {0, 0, 255}, 6);
-      tools::draw_text(
-        img,
-        fmt::format(
-          "{} {} {:.2f}m", auto_aim::ARMOR_NAMES[target->name], auto_aim::ARMOR_TYPES[target->type],
-          distance),
-        cv::Point(target->box.x, target->box.y - 5), {0, 0, 255}, 0.6);
+      command.control = true;
+      command.shoot = false;  // 本程序不接管发射
+      command.yaw = std::atan2(xyz.y(), xyz.x());
+      // 与 Aimer 约定一致：世界系下 pitch 向上为负
+      command.pitch = -std::atan2(xyz.z(), horizon);
+    }
 
-      auto text_gimbal = fmt::format(
-        "gimbal  x {:.3f}  y {:.3f}  z {:.3f}  m", xyz_in_gimbal[0], xyz_in_gimbal[1],
-        xyz_in_gimbal[2]);
-      auto text_world = fmt::format(
-        "world   x {:.3f}  y {:.3f}  z {:.3f}  m  yaw {:.1f} deg", xyz_in_world[0],
-        xyz_in_world[1], xyz_in_world[2], target->ypr_in_world[0] * 57.3);
+    // 0x0402 下发到下位机，由下位机驱动云台；shoot 恒为 0
+    serial_board.send(command);
 
-      tools::draw_text(img, text_gimbal, {10, 30}, {0, 255, 255}, 0.7);
-      tools::draw_text(img, text_world, {10, 60}, {0, 255, 255}, 0.7);
-
-      if (t - last_log_time > 500ms) {
-        last_log_time = t;
-        tools::logger()->info(
-          "[{}] {:.2f} m | {} | {}", auto_aim::ARMOR_NAMES[target->name], distance, text_gimbal,
-          text_world);
+    // 画框与四个关键点（不做 imshow/imwrite，无显示器环境下安全）
+    for (const auto & armor : armors) {
+      cv::rectangle(img, armor.box, cv::Scalar(0, 255, 0), 2);
+      for (const auto & point : armor.points) {
+        cv::circle(img, point, 2, cv::Scalar(0, 0, 255), -1);
       }
     }
 
-    cv::resize(img, img, {}, 0.5, 0.5);
-    cv::imshow("soldier", img);
-    if (cv::waitKey(1) == 'q') break;
+    // 2Hz 打印解算与下发结果，便于无显示环境下调试
+    const auto now = std::chrono::steady_clock::now();
+    if (now - last_log_time > 500ms) {
+      last_log_time = now;
+      if (target != armors.end()) {
+        const Eigen::Vector3d & xyz = target->xyz_in_world;
+        tools::logger()->info(
+          "[soldier] {} {} {:.2f}m | world({:.2f}, {:.2f}, {:.2f}) | cmd yaw={:.1f} pitch={:.1f}",
+          auto_aim::COLORS[target->color], auto_aim::ARMOR_NAMES[target->name],
+          target->xyz_in_gimbal.norm(), xyz[0], xyz[1], xyz[2], command.yaw * 57.3,
+          command.pitch * 57.3);
+      } else {
+        tools::logger()->info(
+          "[soldier] 无目标 | 保持 yaw={:.1f} pitch={:.1f} | gimbal yaw={:.1f}",
+          command.yaw * 57.3, command.pitch * 57.3, gimbal_pos[0] * 57.3);
+      }
+    }
   }
 
   return 0;
