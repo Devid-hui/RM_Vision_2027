@@ -30,7 +30,7 @@ import time
 import tty
 
 # ============================================================================
-# RM 标准 CRC（与 io/gimbal/protocol_crc.cpp 完全一致）
+# RM 标准 CRC（与 io/serial/gimbal/protocol_crc.cpp 完全一致）
 #   CRC8 : 反射多项式 0x8C（即标准 0x31 反射），初值 0xFF
 #   CRC16: 反射多项式 0x8408（即标准 0x1021 反射），初值 0xFFFF
 # ============================================================================
@@ -53,7 +53,7 @@ def _make_crc16_table():
         for _ in range(8):
             crc = (crc >> 1) ^ 0x8408 if (crc & 1) else (crc >> 1)
         table.append(crc & 0xFFFF)
-    # 与 io/gimbal/protocol_crc.cpp 的 W_CRC_TABLE 严格对齐：固件实际使用的表
+    # 与 io/serial/gimbal/protocol_crc.cpp 的 W_CRC_TABLE 严格对齐：固件实际使用的表
     # 在索引 47 处与标准生成表不同（0x0D974，非标准的 0x0D9F5）。
     # 必须保留该差异，否则主程序会拒绝我们生成的每一帧。
     table[47] = 0xD974
@@ -81,7 +81,7 @@ def crc16_update(crc, data):
 
 
 # ============================================================================
-# 协议打包（与 io/gimbal/packet.hpp 结构体逐字节对齐，小端序）
+# 协议打包（与 io/serial/gimbal/packet.hpp 结构体逐字节对齐，小端序）
 # ============================================================================
 HEADER_MAGIC = 0xA5
 

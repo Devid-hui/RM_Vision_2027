@@ -6,7 +6,7 @@
 #include <opencv2/opencv.hpp>
 
 #include "io/camera.hpp"
-#include "io/cboard.hpp"
+#include "io/can/cboard.hpp"
 #include "tasks/auto_aim/armor.hpp"
 #include "tasks/auto_aim/solver.hpp"
 #include "tasks/auto_aim/yolo.hpp"

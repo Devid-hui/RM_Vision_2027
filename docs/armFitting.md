@@ -164,7 +164,7 @@ ARM 上若使用 Ubuntu 22.04 arm64，可直接安装官方 ROS2 Humble arm64 �
 
 - **无 x86 SIMD intrinsics**：全局搜索 `immintrin.h / _mm_* / __x86_64__ / cpuid` 等仅命中海康 SDK 头文件 `MvISPErrorDefine.h` 内的错误码注释，无实际使用。
 - **无端序相关代码**：未发现手写 `htole/le32` 等字节序处理，串口协议均按小端主机序直接 memcpy，ARM/x86 均为小端，行为一致。
-- **SocketCAN**（`io/socketcan.hpp`）：使用内核 `linux/can.h` + epoll，内核 API 跨架构一致。
+- **SocketCAN**（`io/can/socketcan.hpp`）：使用内核 `linux/can.h` + epoll，内核 API 跨架构一致。
 - **相机 SDK 调用**：海康仅枚举 `MV_USB_DEVICE`（USB 相机），MindVision 用 libusb reset，均无架构差异。
 - **线程 / 时间戳**：`std::thread`、`std::chrono::steady_clock` 自建时间戳体系（见 README 约定 4），与平台无关。
 

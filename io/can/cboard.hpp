@@ -10,7 +10,7 @@
 
 #include "io/command.hpp"
 #include "io/mode.hpp"
-#include "io/socketcan.hpp"
+#include "io/can/socketcan.hpp"
 #include "tools/logger.hpp"
 #include "tools/thread_safe_queue.hpp"
 

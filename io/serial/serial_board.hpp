@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "io/command.hpp"
-#include "io/gimbal/packet.hpp"
+#include "io/serial/gimbal/packet.hpp"
 #include "io/sim/common.hpp"
 #include "io/sim/recorder.hpp"
 #include "io/sim/transport.hpp"

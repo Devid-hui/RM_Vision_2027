@@ -2,7 +2,7 @@
 
 #include <stdexcept>
 
-#include "io/gimbal/protocol_crc.hpp"
+#include "io/serial/gimbal/protocol_crc.hpp"
 #include "io/sim/common.hpp"
 #include "io/sim/recorder.hpp"
 #include "io/sim/transport.hpp"
